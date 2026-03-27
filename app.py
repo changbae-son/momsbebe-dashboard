@@ -15,13 +15,15 @@ import plotly.graph_objects as go
 import json
 import os
 from datetime import datetime, timedelta
+import uuid
+import calendar
 
 # ─────────────────────────────────────────────
 # 페이지 기본 설정
 # ─────────────────────────────────────────────
 st.set_page_config(
     page_title="신아인터네셔날 업무 대시보드",
-    page_icon="👶",
+    page_icon="🏷️",
     layout="wide",
     initial_sidebar_state="expanded",
 )
@@ -49,8 +51,41 @@ st.markdown("""
         box-shadow: 0 8px 32px rgba(102, 126, 234, 0.25);
     }
     .header-banner .logo {
-        font-size: 2.8rem;
-        line-height: 1;
+        width: 56px; height: 56px;
+        border-radius: 50%;
+        background: linear-gradient(135deg, #e8192c 0%, #ff4757 100%);
+        display: flex; flex-direction: column;
+        align-items: center; justify-content: center;
+        box-shadow: 0 3px 12px rgba(232,25,44,0.3);
+        flex-shrink: 0;
+    }
+    .header-banner .logo .kb-text {
+        font-size: 0.55rem; font-weight: 900;
+        color: #fff; letter-spacing: 1.5px;
+        line-height: 1; text-transform: uppercase;
+        text-shadow: 0 1px 2px rgba(0,0,0,0.2);
+    }
+    .header-banner .logo .kb-sub {
+        font-size: 0.3rem; color: rgba(255,255,255,0.85);
+        letter-spacing: 0.5px; margin-top: 1px;
+    }
+    .sidebar-logo {
+        width: 44px; height: 44px;
+        border-radius: 50%;
+        background: linear-gradient(135deg, #e8192c 0%, #ff4757 100%);
+        display: inline-flex; flex-direction: column;
+        align-items: center; justify-content: center;
+        box-shadow: 0 2px 8px rgba(232,25,44,0.25);
+        vertical-align: middle; margin-right: 8px;
+    }
+    .sidebar-logo .kb-text {
+        font-size: 0.45rem; font-weight: 900;
+        color: #fff; letter-spacing: 1.2px;
+        line-height: 1; text-transform: uppercase;
+    }
+    .sidebar-logo .kb-sub {
+        font-size: 0.25rem; color: rgba(255,255,255,0.8);
+        letter-spacing: 0.3px; margin-top: 1px;
     }
     .header-banner h1 {
         margin: 0; font-size: 1.7rem; font-weight: 700; letter-spacing: -0.5px;
@@ -117,8 +152,8 @@ st.markdown("""
 
     /* ── KPI 메트릭 카드 ── */
     .kpi-card {
-        padding: 1.2rem 1.4rem;
-        border-radius: 14px;
+        padding: 0.7rem 0.8rem;
+        border-radius: 10px;
         border: 1px solid rgba(128,128,128,0.12);
         background: rgba(128,128,128,0.03);
         text-align: center;
@@ -126,13 +161,13 @@ st.markdown("""
     }
     .kpi-card:hover {
         transform: translateY(-2px);
-        box-shadow: 0 6px 20px rgba(0,0,0,0.08);
+        box-shadow: 0 4px 12px rgba(0,0,0,0.06);
     }
-    .kpi-card .icon { font-size: 1.6rem; margin-bottom: 0.3rem; }
-    .kpi-card .label { font-size: 0.78rem; opacity: 0.6; margin-bottom: 0.3rem; }
-    .kpi-card .value { font-size: 1.6rem; font-weight: 800; }
-    .kpi-card .sub { font-size: 0.7rem; opacity: 0.5; margin-top: 0.2rem; }
-    .kpi-card.pending .value { opacity: 0.35; font-size: 1.1rem; }
+    .kpi-card .icon { font-size: 1.2rem; margin-bottom: 0.15rem; }
+    .kpi-card .label { font-size: 0.72rem; opacity: 0.6; margin-bottom: 0.15rem; }
+    .kpi-card .value { font-size: 1.3rem; font-weight: 800; }
+    .kpi-card .sub { font-size: 0.65rem; opacity: 0.5; margin-top: 0.1rem; }
+    .kpi-card.pending .value { opacity: 0.35; font-size: 1rem; }
 
     /* ── 섹션 헤더 ── */
     .section-title {
@@ -555,6 +590,8 @@ os.makedirs(DATA_DIR, exist_ok=True)
 
 CEO_MSG_FILE = os.path.join(DATA_DIR, "ceo_message.json")
 DAILY_LOG_FILE = os.path.join(DATA_DIR, "daily_logs.json")
+TASKS_FILE = os.path.join(DATA_DIR, "tasks.json")
+STICKY_FILE = os.path.join(DATA_DIR, "sticky_notes.json")
 SEARCH_HISTORY_FILE = os.path.join(DATA_DIR, "search_history.json")
 
 
@@ -609,7 +646,7 @@ def get_naver_api_keys() -> tuple:
         return "", ""
 
 
-@st.cache_data(ttl=300, show_spinner=False)
+@st.cache_data(ttl=600, show_spinner=False)
 def search_naver_shopping_api(keyword: str, top_n: int = 5) -> pd.DataFrame:
     """네이버 쇼핑 검색 API를 사용하여 상품을 검색합니다."""
     client_id, client_secret = get_naver_api_keys()
@@ -775,7 +812,7 @@ def get_onesync_api_key() -> str:
     return keys.get("partner_key", "")
 
 
-@st.cache_data(ttl=300, show_spinner=False)
+@st.cache_data(ttl=600, show_spinner=False)
 def fetch_yesterday_sales() -> dict:
     """OneWMS API(get_order_info)로 어제 매출 데이터를 조회합니다."""
     keys = get_onewms_keys()
@@ -833,7 +870,7 @@ def fetch_yesterday_sales() -> dict:
     }
 
 
-@st.cache_data(ttl=300, show_spinner=False)
+@st.cache_data(ttl=600, show_spinner=False)
 def fetch_product_names() -> dict:
     """OneWMS API로 상품 ID → 상품명 매핑을 가져옵니다."""
     keys = get_onewms_keys()
@@ -858,7 +895,7 @@ def fetch_product_names() -> dict:
     return name_map
 
 
-@st.cache_data(ttl=300, show_spinner=False)
+@st.cache_data(ttl=600, show_spinner=False)
 def fetch_current_inventory() -> dict:
     """OneWMS API(get_stock_tx_info)로 현재 재고 데이터를 조회합니다."""
     keys = get_onewms_keys()
@@ -911,7 +948,7 @@ def fetch_current_inventory() -> dict:
 # ─────────────────────────────────────────────
 # 2-1. 판매 인사이트 분석 (판매 대응 필요 상품 감지)
 # ─────────────────────────────────────────────
-@st.cache_data(ttl=300, show_spinner=False)
+@st.cache_data(ttl=600, show_spinner=False)
 def fetch_sales_insight() -> dict:
     """최근 5영업일 출고 패턴 분석 → 이상 징후 감지."""
     from collections import defaultdict
@@ -1095,10 +1132,90 @@ def analyze_ranking(df: pd.DataFrame, our_df: pd.DataFrame, keyword: str) -> lis
 # ─────────────────────────────────────────────
 # 3-2. 우리 매장 상세 분석
 # ─────────────────────────────────────────────
+def _detect_product_category(title: str) -> str:
+    """상품명에서 카테고리를 추정합니다."""
+    t = title.lower()
+    if any(k in t for k in ["면도", "쉐이빙", "레이저", "면도기"]):
+        return "면도기"
+    elif any(k in t for k in ["기저귀", "팬티형", "밴드형", "pull-up"]):
+        return "기저귀"
+    elif any(k in t for k in ["물티슈", "티슈", "물티슈캡"]):
+        return "물티슈"
+    elif any(k in t for k in ["칫솔", "치약", "구강"]):
+        return "구강용품"
+    elif any(k in t for k in ["세제", "세탁", "섬유유연제", "빨래"]):
+        return "세탁용품"
+    elif any(k in t for k in ["화장", "스킨", "로션", "크림", "세럼", "에센스", "파운데이션", "립", "마스카라"]):
+        return "화장품"
+    elif any(k in t for k in ["커터", "칼날", "블레이드"]):
+        return "커터/문구"
+    elif any(k in t for k in ["젖병", "분유", "이유식", "유아", "아기"]):
+        return "유아용품"
+    return "일반"
+
+
+# 카테고리별 스펙 키워드 및 차별화 조언
+_CATEGORY_SPECS = {
+    "면도기": {
+        "spec_keywords": ["중날", "3중", "4중", "5중", "6중", "스테인리스", "윤활밴드", "윤활스트립", "피벗헤드", "트리머", "논슬립", "고무그립"],
+        "missing_advice": {
+            "날수": {"check": ["중날", "3중", "4중", "5중", "6중", "1회용"], "tip": "날 수(3중날, 5중날 등)를 명시하면 품질 인식 향상"},
+            "윤활": {"check": ["윤활밴드", "윤활스트립", "알로에", "비타민E"], "tip": "윤활밴드/알로에 스트립 유무를 명시하면 프리미엄 이미지 강화"},
+            "헤드": {"check": ["피벗", "회전", "플렉스"], "tip": "피벗헤드(회전 기능) 여부를 강조하면 사용감 어필 가능"},
+            "그립": {"check": ["논슬립", "고무그립", "미끄럼방지"], "tip": "논슬립 그립 소재를 언급하면 안전성·편의성 차별화"},
+        },
+        "diff_tips": ["경쟁사 대비 날 수가 많으면 강조 (예: '5중날 프리미엄')", "대용량 패키지는 '개당 가격' 강조가 효과적", "여행/호텔 용도면 '휴대용 면도기'로 타겟 키워드 추가"],
+    },
+    "기저귀": {
+        "spec_keywords": ["밴드형", "팬티형", "신생아", "소형", "중형", "대형", "특대형", "점보", "순면", "유기농", "통기성"],
+        "missing_advice": {
+            "타입": {"check": ["밴드형", "팬티형", "pull-up"], "tip": "밴드형/팬티형 구분을 명시하면 정확한 검색 매칭"},
+            "사이즈": {"check": ["신생아", "소형", "중형", "대형", "특대형", "S", "M", "L", "XL"], "tip": "사이즈/단계를 명시하면 타겟 고객 클릭률 향상"},
+            "소재": {"check": ["순면", "유기농", "오가닉", "천연"], "tip": "순면/유기농 소재 강조는 프리미엄 포지셔닝에 효과적"},
+            "흡수력": {"check": ["흡수", "12시간", "밤새", "오버나이트"], "tip": "흡수력(12시간 지속 등)을 수치로 표현하면 신뢰도 상승"},
+        },
+        "diff_tips": ["수량 대비 가격(개당 단가) 강조가 구매 결정에 핵심", "아기 피부 민감도 관련 인증(피부테스트 완료 등) 강조"],
+    },
+    "물티슈": {
+        "spec_keywords": ["캡형", "리필", "엠보싱", "무향", "무알코올", "무파라벤", "EDI정제수", "두꺼운"],
+        "missing_advice": {
+            "성분": {"check": ["EDI", "정제수", "무알코올", "무파라벤", "무향"], "tip": "EDI정제수/무알코올/무파라벤 등 안전 성분을 강조하면 엄마 고객 신뢰도 상승"},
+            "두께": {"check": ["두꺼운", "엠보싱", "프리미엄"], "tip": "'두꺼운 엠보싱' 등 질감을 강조하면 프리미엄 인식 향상"},
+            "형태": {"check": ["캡형", "리필", "휴대용"], "tip": "캡형/리필/휴대용 구분을 명시하면 용도별 검색 노출 증가"},
+        },
+        "diff_tips": ["매수 대비 가격(장당 단가) 명시가 가성비 어필에 효과적", "생분해/친환경 키워드가 최근 트렌드"],
+    },
+    "화장품": {
+        "spec_keywords": ["용량", "ml", "g", "SPF", "PA", "비건", "더마", "CICA", "히알루론산"],
+        "missing_advice": {
+            "용량": {"check": ["ml", "g", "oz"], "tip": "정확한 용량(ml/g)을 명시하면 가격 비교 시 유리"},
+            "성분": {"check": ["비건", "더마", "CICA", "히알루론산", "나이아신아마이드", "레티놀"], "tip": "주요 성분명을 포함하면 성분 검색 고객 유입 증가"},
+        },
+        "diff_tips": ["인증/테스트 결과(피부과 테스트 완료 등) 강조", "용량 대비 가격(ml당 단가) 비교 제시"],
+    },
+    "커터/문구": {
+        "spec_keywords": ["스테인리스", "자동잠금", "세라믹", "고탄소강"],
+        "missing_advice": {
+            "칼날": {"check": ["스테인리스", "세라믹", "고탄소강", "SKS-7"], "tip": "칼날 소재(스테인리스, SKS-7 등)를 명시하면 품질 신뢰도 향상"},
+            "안전": {"check": ["자동잠금", "안전", "슬라이드"], "tip": "자동잠금/안전 기능을 강조하면 차별화 가능"},
+        },
+        "diff_tips": ["칼날 교체 편의성이나 내구성을 강조"],
+    },
+    "일반": {
+        "spec_keywords": [],
+        "missing_advice": {},
+        "diff_tips": ["수량/용량 정보를 명확히 표기하면 가성비 인식 향상", "용도(가정용, 업소용 등)를 명시하면 타겟 검색 노출 증가"],
+    },
+}
+
+
 def analyze_product_title(title: str) -> dict:
-    """상품명을 분석하여 문제점과 개선안을 제시합니다."""
+    """상품명을 분석하여 카테고리 맞춤 문제점과 개선안을 제시합니다."""
     issues = []
     suggestions = []
+
+    # 카테고리 감지
+    category = _detect_product_category(title)
 
     # 길이 체크
     if len(title) > 50:
@@ -1115,22 +1232,41 @@ def analyze_product_title(title: str) -> dict:
         if keyword in title and product_type in title.lower():
             issues.append(f"'{keyword}' — 실제 미포함 키워드 의심. 네이버 SEO 패널티 위험")
 
-    # 스펙 정보 포함 여부
-    has_count = any(c.isdigit() for c in title) and any(u in title for u in ["개", "입", "P", "EA", "매"])
+    # 수량 정보 포함 여부
+    has_count = any(c.isdigit() for c in title) and any(u in title for u in ["개", "입", "P", "EA", "매", "ml", "g"])
     if not has_count:
-        suggestions.append("수량 정보(예: 24개입)를 명시하면 클릭률 향상")
+        suggestions.append("수량/용량 정보(예: 24개입, 200ml)를 명시하면 클릭률 향상")
 
-    spec_keywords = ["중날", "3중", "4중", "5중", "6중", "7중", "스테인리스", "윤활밴드"]
-    has_spec = any(sk in title for sk in spec_keywords)
-    if not has_spec:
-        suggestions.append("제품 스펙(예: 3중날, 윤활밴드)을 추가하면 차별화 가능")
+    # 카테고리 맞춤 스펙 분석
+    cat_info = _CATEGORY_SPECS.get(category, _CATEGORY_SPECS["일반"])
 
-    usage_keywords = ["휴대용", "여행용", "업소용", "호텔용", "대용량"]
+    found_specs = []
+    for sk in cat_info.get("spec_keywords", []):
+        if sk.lower() in title.lower():
+            found_specs.append(sk)
+
+    # 누락된 스펙별 맞춤 조언
+    for spec_name, spec_info in cat_info.get("missing_advice", {}).items():
+        has_it = any(kw.lower() in title.lower() for kw in spec_info["check"])
+        if not has_it:
+            suggestions.append(spec_info["tip"])
+
+    # 용도 키워드
+    usage_keywords = ["휴대용", "여행용", "업소용", "호텔용", "대용량", "가정용"]
     has_usage = any(uk in title for uk in usage_keywords)
     if not has_usage:
-        suggestions.append("용도 키워드(휴대용, 여행용 등)를 추가하면 타겟 검색 노출 증가")
+        suggestions.append("용도 키워드(휴대용, 여행용, 업소용 등)를 추가하면 타겟 검색 노출 증가")
 
-    return {"issues": issues, "suggestions": suggestions}
+    # 차별화 팁
+    diff_tips = cat_info.get("diff_tips", [])
+
+    return {
+        "issues": issues,
+        "suggestions": suggestions,
+        "category": category,
+        "found_specs": found_specs,
+        "diff_tips": diff_tips,
+    }
 
 
 def analyze_price_competitiveness(our_price: int, our_title: str, all_df) -> dict:
@@ -1212,7 +1348,220 @@ def generate_thumbnail_analysis(image_url: str, product_name: str, rank: int) ->
 
 
 # ─────────────────────────────────────────────
-# 3-3. ScraperAPI 기반 상세페이지 분석
+# 3-3. CTA 관점 상세페이지 분석 (논문 기반)
+# ─────────────────────────────────────────────
+def analyze_cta_strategy(our_price: int, our_name: str, our_rank: int,
+                         price_analysis: dict, title_analysis: dict,
+                         detail_extra: dict, all_df) -> dict:
+    """논문 기반 CTA(Call-to-Action) 관점 상세페이지 리디자인 분석.
+
+    참고 논문:
+    - Kakuko et al. (2024): 상품 페이지 디자인이 구매에 미치는 영향 (r=0.819)
+    - Deng (2024): 앵커링 효과와 온라인 가격 전략
+    """
+    category = title_analysis.get("category", "일반")
+    our_qty = price_analysis.get("우리_수량", 0)
+    our_unit = price_analysis.get("우리_개당가격", 0)
+    comps = price_analysis.get("경쟁사", [])
+
+    # ── 1. 가격 앵커링 전략 ──
+    anchoring = {"score": 0, "max": 3, "items": []}
+
+    # 개당 단가 앵커
+    if our_qty and our_unit:
+        single_price_est = our_unit  # 낱개 가격 추정
+        if category == "물티슈":
+            unit_label = "장당"
+            # 물티슈: 매수 기준 단가
+            qty_match = __import__('re').findall(r'(\d+)\s*매', our_name)
+            sheets = int(qty_match[0]) if qty_match else 0
+            packs_match = __import__('re').findall(r'(\d+)\s*(?:팩|개입|입)', our_name)
+            packs = int(packs_match[0]) if packs_match else our_qty
+            total_sheets = sheets * packs if sheets else our_qty
+            if total_sheets > 0:
+                sheet_price = round(our_price / total_sheets, 1)
+                anchoring["items"].append({
+                    "type": "단가 앵커",
+                    "status": "적용 가능",
+                    "action": f"상세페이지에 **'{unit_label} {sheet_price}원'** 강조 표시 → 가성비 인식 극대화",
+                    "detail": f"총 {total_sheets:,}매 ÷ {our_price:,}원 = {unit_label} {sheet_price}원",
+                })
+        elif category == "기저귀":
+            unit_label = "장당"
+            anchoring["items"].append({
+                "type": "단가 앵커",
+                "status": "적용 가능",
+                "action": f"**'{unit_label} {our_unit:,}원'** 표시 → 가성비 핵심 어필 포인트",
+                "detail": f"{our_qty}개 ÷ {our_price:,}원",
+            })
+        else:
+            unit_label = "개당"
+            anchoring["items"].append({
+                "type": "단가 앵커",
+                "status": "적용 가능",
+                "action": f"**'{unit_label} {our_unit:,}원'** 표시 → 가성비 핵심 어필 포인트",
+                "detail": f"{our_qty}개 ÷ {our_price:,}원",
+            })
+        anchoring["score"] += 1
+
+    # 할인/원가 앵커
+    anchoring["items"].append({
+        "type": "원가 대비 앵커",
+        "status": "확인 필요",
+        "action": "원래 가격(정가)을 취소선으로 표시하고, 현재가를 크게 표시 → **할인 프레이밍**",
+        "detail": "예: ~~42,000원~~ → **32,000원** (24% 할인)",
+    })
+
+    # 경쟁사 대비 앵커
+    if comps:
+        most_expensive = max(comps, key=lambda x: x["개당가격"])
+        if our_unit and our_unit < most_expensive["개당가격"]:
+            save_pct = round((1 - our_unit / most_expensive["개당가격"]) * 100)
+            anchoring["items"].append({
+                "type": "경쟁 비교 앵커",
+                "status": "우위",
+                "action": f"경쟁사 대비 **{save_pct}% 저렴** — 비교표를 상세페이지에 삽입",
+                "detail": f"우리 {our_unit:,}원 vs 최고가 {most_expensive['개당가격']:,}원({most_expensive['판매처']})",
+            })
+            anchoring["score"] += 1
+
+    # ── 상품명에서 실제 문구 재료 추출 ──
+    import re as _re
+    # 브랜드명 추출 (첫 단어 또는 한글 2~4자)
+    brand_match = _re.match(r'^([가-힣A-Za-z]+)', our_name)
+    brand_name = brand_match.group(1) if brand_match else "우리 제품"
+    # 짧은 상품 요약 (앞 15자)
+    short_name = our_name[:15].strip()
+    # 수량 텍스트
+    qty_text = f"{our_qty}개" if our_qty else ""
+    price_text = f"{our_price:,}원" if our_price else ""
+
+    # 카테고리별 리뷰 키워드 예시
+    _review_keywords = {
+        "물티슈": ["두꺼워요 💪", "향이 좋아요 🌿", "아기 피부에 순해요 👶", "가성비 최고 💰"],
+        "면도기": ["면도 잘 돼요 ✨", "피부 자극 없어요 🛡️", "그립감 좋아요 👍", "날이 오래가요 💎"],
+        "기저귀": ["안 새요 🛡️", "부드러워요 🧸", "통기성 좋아요 🌬️", "가성비 최고 💰"],
+        "화장품": ["촉촉해요 💧", "흡수 빨라요 ⚡", "향이 좋아요 🌸", "순한 성분 🌿"],
+    }
+    review_kw = _review_keywords.get(category, ["품질 좋아요 ⭐", "가성비 최고 💰", "빠른배송 🚀"])
+
+    # ── 2. 사회적 증거 (Social Proof) ──
+    social_proof = {"score": 0, "max": 3, "items": []}
+
+    social_proof["items"].append({
+        "type": "판매량 표시",
+        "action": "상세페이지 최상단에 누적 판매 배지 삽입",
+        "detail": "논문: 60.8%가 리뷰/사회적 증거를 구매 결정에 중요하게 평가 (Kakuko et al.)",
+        "example": f'🏆 "{brand_name} 시리즈 누적 판매 10만개 돌파!" · "네이버쇼핑 {category} 부문 BEST"',
+    })
+    social_proof["items"].append({
+        "type": "리뷰 하이라이트",
+        "action": "상세페이지 중간에 베스트 리뷰 키워드 배지 삽입 → 스크롤 중 이탈 방지",
+        "detail": "리뷰에서 자주 등장하는 키워드를 배지화하여 시각적 신뢰 구축",
+        "example": f"💬 실구매자 키워드: {' · '.join([f'「{kw}」' for kw in review_kw])}",
+    })
+    social_proof["items"].append({
+        "type": "사회적 동조 앵커",
+        "action": "이번 달 구매자 수 또는 재구매율 문구 추가",
+        "detail": "논문: 다수의 선택이 앵커로 작용, 소비자가 검토 없이 같은 행동을 취함 (Deng, 2024)",
+        "example": f'📊 "이번 달 {brand_name} 구매자 1,200명+" · "재구매율 94% — 한번 쓰면 바꿀 수 없는 {category}"',
+    })
+
+    # ── 3. FOMO(희소성·긴급성) 전략 ──
+    fomo = {"score": 0, "max": 3, "items": []}
+
+    fomo["items"].append({
+        "type": "시간 앵커",
+        "action": "당일 출고 마감 시간을 명시하여 즉각 행동 유도",
+        "detail": "논문: 시간 앵커가 소비자의 의사결정 과정을 단축시킴 (Deng, 2024)",
+        "example": f'⏰ "오늘 17시 이전 주문 → 당일 출고!" · "지금 주문하면 내일 {short_name} 받아보세요"',
+    })
+    fomo["items"].append({
+        "type": "재고 앵커",
+        "action": "실제 재고 데이터 기반 소진 임박 표시 (OneWMS 연동)",
+        "detail": "실제 재고가 적을 때만 노출하면 신뢰도 유지 — 허위 희소성은 역효과",
+        "example": f'🔥 "현재 재고 23개 — 이번 주 소진 예상" · "{brand_name} {category} 입고 대기 중, 지금이 마지막!"',
+    })
+    fomo["items"].append({
+        "type": "프로모션 앵커",
+        "action": "한정 혜택(무료배송/추가증정)으로 구매 전환율 상승",
+        "detail": "논문: 52.1%가 인센티브/프로모션이 구매 유도에 효과적이라고 응답 (Kakuko et al.)",
+        "example": f'🎁 "이번 주만! {short_name} 무료배송" · "{qty_text} 구매 시 +1개 추가 증정"' if qty_text else f'🎁 "이번 주만! {short_name} 무료배송 + 사은품 증정"',
+    })
+
+    # ── 4. 장바구니 이탈 방지 ──
+    cart_abandon = {"score": 0, "max": 4, "items": []}
+
+    cart_abandon["items"].append({
+        "type": "정보 불안 해소",
+        "action": "상세페이지 상단에 핵심 정보 집중 배치 → 스크롤 전에 확신 제공",
+        "detail": "배송정보 · 교환/반품 · 성분안전성을 한눈에 → 논문: 35%만 정보 충분하다고 응답 (개선 여지 큼)",
+        "example": f'📋 상단 배치 예: "✅ 무료배송 · ✅ 당일출고 · ✅ 100% 환불보장 · ✅ 정품인증"',
+    })
+
+    # 카테고리별 불안 해소 포인트
+    if category == "물티슈":
+        cart_abandon["items"].append({
+            "type": "안전성 인증",
+            "action": "피부테스트·성분안전 인증 배지를 상단에 배치",
+            "detail": "엄마 고객의 최대 관심사 = 아기 피부 안전성. 스크롤 전에 해결해야 이탈 방지",
+            "example": f'🛡️ "EDI정제수 99.9% · 무알코올 · 무파라벤 · 피부자극 테스트 완료" 인증마크',
+        })
+    elif category == "면도기":
+        cart_abandon["items"].append({
+            "type": "품질 인증",
+            "action": "칼날 품질·피부 안전 인증 배지 상단 배치",
+            "detail": "면도기 구매 시 핵심 불안요소 = 칼날 품질 + 피부 자극",
+            "example": f'🛡️ "스테인리스 정밀 칼날 · 인체공학 논슬립 그립 · 민감성 피부 테스트 완료"',
+        })
+    elif category == "기저귀":
+        cart_abandon["items"].append({
+            "type": "안전성 인증",
+            "action": "피부과 테스트·소재 안전 인증 배지 상단 배치",
+            "detail": "기저귀의 핵심 구매 불안 = 아기 피부 트러블",
+            "example": f'🛡️ "피부과 테스트 완료 · 순면 탑시트 · 무형광증백제 · 3중 누수방지"',
+        })
+
+    cart_abandon["items"].append({
+        "type": "경쟁사 비교표",
+        "action": "우리 vs 경쟁사 비교표를 상세페이지에 삽입 → 이탈 전 확신 제공",
+        "detail": "가격, 수량, 핵심 스펙을 한눈에 비교 → 다른 페이지로 이탈할 필요 제거",
+        "example": f'📊 비교표: "{brand_name} {price_text}/{qty_text}" vs 경쟁사 A/B → 개당 단가 강조' if qty_text else f'📊 "{brand_name}" vs 경쟁사 비교표 — 가격·품질·배송 한눈에',
+    })
+    cart_abandon["items"].append({
+        "type": "배송·교환 안심",
+        "action": "무료배송·무료교환·환불보장 배지를 CTA 버튼 바로 위에 배치",
+        "detail": "구매 직전 마지막 불안을 해소하는 위치가 중요 (CTA 버튼 근처)",
+        "example": '🚚 CTA 버튼 바로 위: "무료배송 · 무료교환 · 100% 환불보장 — 걱정 없이 주문하세요"',
+    })
+
+    # ── 5. CTA 버튼 최적화 ──
+    cta_button = {"items": []}
+    cta_button["items"].append({
+        "type": "행동 유도 문구",
+        "action": "'구매하기' 대신 혜택을 포함한 구체적 문구 사용",
+        "detail": "논문: CTA 버튼 가시성과 문구가 전환율에 직접적 영향 — 68.2% 동의 (Kakuko et al.)",
+        "example": f'🔘 "{price_text} 무료배송으로 받기" · "할인가 {price_text}에 지금 구매" · "오늘만 이 가격! 바로 주문"' if price_text else '🔘 "오늘 무료배송으로 받기" · "할인가로 지금 구매"',
+    })
+    cta_button["items"].append({
+        "type": "시각적 계층",
+        "action": "상세페이지 내 중간·하단에 CTA 유도 섹션 반복 배치",
+        "detail": "긴 상세페이지에서 스크롤 중간에 구매 동기를 재점화하는 구간 필요",
+        "example": f'📍 스크롤 중간 삽입: "여기까지 읽으셨다면, {brand_name} {category}의 차이를 느끼셨을 거예요 → 지금 주문하기"',
+    })
+
+    return {
+        "anchoring": anchoring,
+        "social_proof": social_proof,
+        "fomo": fomo,
+        "cart_abandon": cart_abandon,
+        "cta_button": cta_button,
+        "category": category,
+    }
+
+
+# ─────────────────────────────────────────────
+# 3-4. ScraperAPI 기반 상세페이지 분석
 # ─────────────────────────────────────────────
 import re
 
@@ -1408,9 +1757,106 @@ def extract_brand(product_name: str) -> str:
 
 
 # ─────────────────────────────────────────────
+# 공통: 판매처 URL 생성 & 판매처 상세 팝업
+# ─────────────────────────────────────────────
+def build_shop_url(shop_name: str, shop_product_id: str) -> str:
+    """판매처명 + shop_product_id로 상품 페이지 URL을 생성합니다."""
+    sn = shop_name.lower()
+    if "스토어팜" in shop_name or "네이버" in sn:
+        if "맘스베베" in shop_name:
+            return f"https://smartstore.naver.com/momsbebe/products/{shop_product_id}"
+        elif "키니비니" in shop_name:
+            return f"https://smartstore.naver.com/kinibini/products/{shop_product_id}"
+        elif "키니공식" in shop_name:
+            return f"https://smartstore.naver.com/kinibini_official/products/{shop_product_id}"
+        return f"https://smartstore.naver.com/main/products/{shop_product_id}"
+    elif "11번가" in shop_name:
+        return f"https://www.11st.co.kr/products/{shop_product_id}"
+    elif "쿠팡" in shop_name:
+        return f"https://www.coupang.com/vp/products/{shop_product_id}"
+    elif "g마켓" in sn:
+        return f"https://item.gmarket.co.kr/Item?goodscode={shop_product_id}"
+    elif "옥션" in shop_name:
+        return f"https://itempage3.auction.co.kr/DetailView.aspx?ItemNo={shop_product_id}"
+    elif "롯데" in shop_name:
+        return f"https://www.lotteon.com/p/product/{shop_product_id}"
+    elif "신세계" in shop_name or "이마트" in shop_name or "ssg" in sn:
+        return f"https://www.ssg.com/item/itemView.ssg?itemId={shop_product_id}"
+    elif "카카오" in shop_name:
+        return f"https://store.kakao.com/products/{shop_product_id}"
+    elif "토스" in shop_name:
+        return f"https://commerce.toss.im/products/{shop_product_id}"
+    return ""
+
+
+@st.dialog("🛒 판매처별 판매 현황", width="large")
+def show_shop_detail_dialog():
+    """공통 판매처 상세 팝업 — session_state['_shop_detail_data'] 사용"""
+    data = st.session_state.get("_shop_detail_data", {})
+    if not data:
+        st.warning("데이터를 불러올 수 없습니다.")
+        return
+
+    p_name = data.get("product_name", "")
+    p_id = data.get("product_id", "")
+    brand = data.get("brand", "")
+    avg_qty = data.get("avg_qty", 0)
+    today_shipped = data.get("today_shipped")
+    shop_summary = data.get("shop_summary", "")
+    shops_info = data.get("shops", [])
+    total_qty = sum(s["qty"] for s in shops_info)
+    total_amount = sum(s["amount"] for s in shops_info)
+    total_orders = sum(s["order_count"] for s in shops_info)
+
+    # ── 상단 요약 영역 ──
+    today_badge = ""
+    if today_shipped is True:
+        today_badge = " · ✅ 오늘출고"
+    elif today_shipped is False:
+        today_badge = " · ❌ 미출고"
+    summary_line = f"**{brand}** | {p_name}"
+    if avg_qty:
+        summary_line += f" — 일평균 **{avg_qty}개**"
+    summary_line += today_badge
+    if shop_summary:
+        summary_line += f" | 🛒 {shop_summary}"
+    st.markdown(summary_line)
+    st.divider()
+
+    # ── KPI 지표 ──
+    hc = st.columns(4)
+    hc[0].metric("상품코드", p_id)
+    hc[1].metric("총 판매수량", f"{total_qty}개")
+    hc[2].metric("총 주문건수", f"{total_orders}건")
+    hc[3].metric("총 매출액", f"{total_amount:,}원")
+
+    # ── 판매처 테이블 ──
+    rows = []
+    for shop in shops_info:
+        pct = round(shop["qty"] / total_qty * 100, 1) if total_qty else 0
+        url_text = shop["urls"][0] if shop["urls"] else ""
+        rows.append({
+            "판매처": shop["name"], "판매수량": shop["qty"], "점유율(%)": pct,
+            "주문건수": shop["order_count"], "매출액": shop["amount"], "상품URL": url_text,
+        })
+    st.dataframe(
+        pd.DataFrame(rows), use_container_width=True, hide_index=True,
+        column_config={
+            "판매처": st.column_config.TextColumn("판매처", width="medium"),
+            "판매수량": st.column_config.NumberColumn("판매수량", format="%d개"),
+            "점유율(%)": st.column_config.ProgressColumn("점유율", min_value=0, max_value=100, format="%.0f%%"),
+            "주문건수": st.column_config.NumberColumn("주문건수", format="%d건"),
+            "매출액": st.column_config.NumberColumn("매출액", format="%d원"),
+            "상품URL": st.column_config.LinkColumn("상품페이지", display_text="열기 ↗"),
+        },
+        height=min(len(rows) * 40 + 60, 400),
+    )
+
+
+# ─────────────────────────────────────────────
 # 판매처별 매출 조회
 # ─────────────────────────────────────────────
-@st.cache_data(ttl=300, show_spinner=False)
+@st.cache_data(ttl=600, show_spinner=False)
 def fetch_shop_list() -> dict:
     """판매처 목록을 가져옵니다."""
     data = call_onewms_api("get_etc_info", {"type": "product", "search_type": "shop"})
@@ -1419,9 +1865,8 @@ def fetch_shop_list() -> dict:
     return {}
 
 
-@st.cache_data(ttl=300, show_spinner=False)
-def fetch_orders_by_date(date_str: str) -> list:
-    """특정 날짜의 주문 데이터를 가져옵니다."""
+def _fetch_orders_by_date_raw(date_str: str) -> list:
+    """특정 날짜의 주문 데이터를 가져옵니다 (캐시 없음, 병렬 호출용)."""
     all_orders = []
     for page in range(1, 30):
         data = call_onewms_api("get_order_info", {
@@ -1443,16 +1888,37 @@ def fetch_orders_by_date(date_str: str) -> list:
     return all_orders
 
 
+@st.cache_data(ttl=600, show_spinner=False)
+def fetch_orders_by_date(date_str: str) -> list:
+    """특정 날짜의 주문 데이터 (단일 호출, 캐시)."""
+    return _fetch_orders_by_date_raw(date_str)
+
+
+@st.cache_data(ttl=600, show_spinner=False)
+def fetch_orders_parallel(date_strings: tuple) -> dict:
+    """여러 날짜의 주문 데이터를 병렬로 가져옵니다. {date_str: [orders]}"""
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+    results = {}
+    with ThreadPoolExecutor(max_workers=7) as executor:
+        future_to_date = {executor.submit(_fetch_orders_by_date_raw, d): d for d in date_strings}
+        for future in as_completed(future_to_date):
+            date_str = future_to_date[future]
+            try:
+                results[date_str] = future.result()
+            except Exception:
+                results[date_str] = []
+    return results
+
+
 with st.sidebar:
-    st.markdown("# 👶 신아인터네셔날")
+    st.markdown('<div style="display:flex;align-items:center;margin-bottom:0.3rem;"><div class="sidebar-logo"><div class="kb-text">KINI<br>BINI</div><div class="kb-sub">Premium</div></div><span style="font-size:1.3rem;font-weight:800;">신아인터네셔날</span></div>', unsafe_allow_html=True)
     st.caption("ShinA International 업무 대시보드")
     st.markdown("---")
 
     # ── 메뉴 네비게이션 ──
     menu_items = {
         "📊 대시보드": "dashboard",
-        "🚨 판매 대응": "sales_action",
-        "📦 재고 현황": "inventory",
+        "📦 판매대응 및 재고": "sales_inventory",
         "🛒 가격 모니터링": "price_monitor",
         "📝 업무 일지": "daily_log",
     }
@@ -1501,149 +1967,335 @@ def show_detail_analysis(data: dict, all_df):
     our_link = data["link"]
     our_mall = data["mall"]
 
-    # 분석 실행
+    # ── 분석 실행 ──
     title_analysis = analyze_product_title(our_name)
     price_analysis = analyze_price_competitiveness(our_price, our_name, all_df)
     thumb_analysis = generate_thumbnail_analysis(our_image, our_name, our_rank)
 
-    # ScraperAPI로 상세페이지 추가 데이터 수집
     detail_data_extra = {}
     if our_link and our_link != "#":
         with st.spinner("상세페이지 분석 중..."):
             detail_data_extra = fetch_smartstore_detail(our_link)
 
-    # 블로그 리뷰 수집
     blog_reviews = fetch_blog_reviews(our_name[:25], top_n=3)
     review_summary = analyze_blog_reviews(blog_reviews) if blog_reviews else {"pros": [], "cons": [], "count": 0}
+    cta = analyze_cta_strategy(our_price, our_name, our_rank, price_analysis, title_analysis, detail_data_extra, all_df)
 
-    # ── 헤더: 썸네일 + 기본 정보 ──
-    img_tag = f'<img src="{our_image}" alt="상품" style="width:90px; height:90px; border-radius:10px; object-fit:cover; border:1px solid rgba(128,128,128,0.15); flex-shrink:0;" />' if our_image else ""
-    link_tag = f'<a href="{our_link}" target="_blank" style="font-size:0.78rem; opacity:0.6;">상품 페이지 열기 ↗</a>' if our_link != "#" else ""
+    # ════════════════════════════════════════
+    # SECTION 1: 상품 헤더 + 점수 인라인 (한 줄로)
+    # ════════════════════════════════════════
 
-    st.markdown(f'''<div style="display:flex; align-items:center; gap:1rem; margin-bottom:1rem;">
-        {img_tag}
-        <div style="min-width:0;">
-            <h3 style="margin:0 0 0.3rem 0; font-size:1.1rem;">🏪 {our_mall} · {our_rank}위 · {our_price:,}원</h3>
-            <div style="font-size:0.85rem; opacity:0.7; word-break:break-all;">{our_name}</div>
-            <div>{link_tag}</div>
-        </div>
-    </div>''', unsafe_allow_html=True)
-
-    st.divider()
-
-    # ── 1. 썸네일 분석 ──
-    st.markdown("##### 📸 썸네일 이미지 분석")
-    for issue in thumb_analysis.get("issues", []):
-        st.markdown(f"⚠️ {issue}")
-    for sug in thumb_analysis.get("suggestions", []):
-        st.markdown(f"💡 {sug}")
-
-    st.divider()
-
-    # ── 2. 상품명 분석 ──
-    st.markdown("##### 📝 상품명 분석")
-    if title_analysis["issues"]:
-        for issue in title_analysis["issues"]:
-            st.markdown(f"⚠️ {issue}")
-    else:
-        st.markdown("✅ 상품명 구성이 양호합니다.")
-    for sug in title_analysis.get("suggestions", []):
-        st.markdown(f"💡 {sug}")
-
-    st.divider()
-
-    # ── 3. 가격 경쟁력 ──
-    st.markdown("##### 💰 가격 경쟁력 (개당 단가 비교)")
-    if price_analysis.get("우리_개당가격"):
-        our_unit = price_analysis["우리_개당가격"]
-        our_qty = price_analysis["우리_수량"]
-        st.markdown(f"📦 **우리: {our_price:,}원 ÷ {our_qty}개 = 개당 {our_unit:,}원**")
-
-        comps = price_analysis.get("경쟁사", [])
-        if comps:
-            cheapest_comp = comps[0]
-            if our_unit > cheapest_comp["개당가격"]:
-                diff_val = our_unit - cheapest_comp["개당가격"]
-                st.markdown(f"⚠️ 최저 경쟁사({cheapest_comp['판매처']})보다 개당 **{diff_val:,}원 비쌈**")
-            else:
-                diff_val = cheapest_comp["개당가격"] - our_unit
-                st.markdown(f"✅ 최저 경쟁사보다 개당 **{diff_val:,}원 저렴** — 가격 우위!")
-
-            # 비교 테이블
-            table_rows = [{"순위": f"{our_rank}위 🏪", "판매처": our_mall, "가격": f"{our_price:,}원", "수량": f"{our_qty}개", "개당가격": f"{our_unit:,}원"}]
-            for comp in comps[:4]:
-                table_rows.append({
-                    "순위": f"{comp['순위']}위",
-                    "판매처": comp["판매처"],
-                    "가격": f"{comp['가격']:,}원",
-                    "수량": f"{comp['수량']}개",
-                    "개당가격": f"{comp['개당가격']:,}원",
-                })
-            st.dataframe(pd.DataFrame(table_rows), use_container_width=True, hide_index=True)
-    else:
-        st.markdown("ℹ️ 상품명에서 수량 정보를 추출할 수 없어 개당 가격 비교가 어렵습니다.")
-
-    st.divider()
-
-    # ── 4. 상세페이지 정보 (ScraperAPI) ──
-    if detail_data_extra and not detail_data_extra.get("error"):
-        st.markdown("##### 🏪 스마트스토어 상세 정보")
-        info_cols = st.columns(2)
-        with info_cols[0]:
-            st.markdown(f"**스토어명:** {detail_data_extra.get('store_name', '-')}")
-            st.markdown(f"**카테고리:** {detail_data_extra.get('category', '-')}")
-            st.markdown(f"**판매상태:** {detail_data_extra.get('status', '-')}")
-        with info_cols[1]:
-            store_domain = detail_data_extra.get("store_domain", "")
-            if store_domain:
-                st.markdown(f"**자체 도메인:** {store_domain}")
-            store_url = detail_data_extra.get("store_url", "")
-            if store_url:
-                st.markdown(f"**스토어 URL:** smartstore.naver.com/{store_url}")
-            store_img = detail_data_extra.get("store_image", "")
-            if store_img:
-                st.image(store_img, width=80, caption="스토어 대표 이미지")
-        st.divider()
-
-    # ── 5. 블로그 리뷰 분석 ──
-    if review_summary["pros"] or review_summary["cons"]:
-        st.markdown("##### 💬 블로그 리뷰 장단점")
-        rv_cols = st.columns(2)
-        with rv_cols[0]:
-            st.markdown("**장점**")
-            for p in review_summary["pros"]:
-                st.markdown(f"👍 {p}")
-            if not review_summary["pros"]:
-                st.caption("추출된 장점 없음")
-        with rv_cols[1]:
-            st.markdown("**단점**")
-            for c in review_summary["cons"]:
-                st.markdown(f"👎 {c}")
-            if not review_summary["cons"]:
-                st.caption("추출된 단점 없음")
-        # 블로그 원문 링크
-        if blog_reviews:
-            st.markdown("**출처:**")
-            for b in blog_reviews[:2]:
-                st.markdown(f"[📝 {b['title'][:40]}...]({b['link']})")
-        st.divider()
-
-    # ── 6. 즉시 실행 액션 플랜 ──
-    st.markdown("##### 🎯 즉시 실행 액션 플랜")
-    action_items = []
-    if thumb_analysis.get("issues"):
-        action_items.append("🔴 **썸네일 이미지 교체** — 제품 스펙이 보이는 디자인 이미지로 교체 (수량, 특징 텍스트 삽입)")
-    if title_analysis.get("issues"):
-        action_items.append("🔴 **상품명 수정** — 관련 없는 키워드 제거, 실제 스펙 키워드로 교체")
+    # 점수 계산 (먼저)
+    scores = {}
     if price_analysis.get("우리_개당가격") and price_analysis.get("경쟁사"):
-        cheapest_comp = price_analysis["경쟁사"][0]
-        if price_analysis["우리_개당가격"] > cheapest_comp["개당가격"]:
-            action_items.append(f"🟡 **가격 재검토** — 개당 단가를 {cheapest_comp['개당가격']:,}원 이하로 낮출 수 있는 묶음 구성 고려")
-    action_items.append("🟡 **리뷰 확보** — 구매 후 포토리뷰 작성 시 적립금 500~1,000원 제공")
-    action_items.append("🟢 **상세페이지 보강** — 비교표, 사용 후기 사진, FAQ 추가로 체류시간 증가")
+        cheapest = price_analysis["경쟁사"][0]
+        if price_analysis["우리_개당가격"] <= cheapest["개당가격"]:
+            scores["가격"] = {"s": "우위", "c": "#22c55e", "d": f"{price_analysis['우리_개당가격']:,}원"}
+        elif price_analysis["우리_개당가격"] <= cheapest["개당가격"] * 1.1:
+            scores["가격"] = {"s": "보통", "c": "#f59e0b", "d": f"{price_analysis['우리_개당가격']:,}원"}
+        else:
+            diff_pct = round((price_analysis["우리_개당가격"] / cheapest["개당가격"] - 1) * 100)
+            scores["가격"] = {"s": "주의", "c": "#ef4444", "d": f"+{diff_pct}%"}
+    else:
+        scores["가격"] = {"s": "-", "c": "#94a3b8", "d": "분석불가"}
 
-    for item in action_items:
-        st.markdown(item)
+    issues_count = len(title_analysis.get("issues", []))
+    sug_count = len(title_analysis.get("suggestions", []))
+    if issues_count > 0:
+        scores["상품명"] = {"s": "수정", "c": "#ef4444", "d": f"{issues_count}건"}
+    elif sug_count > 2:
+        scores["상품명"] = {"s": "개선", "c": "#f59e0b", "d": f"{sug_count}건"}
+    else:
+        scores["상품명"] = {"s": "양호", "c": "#22c55e", "d": "OK"}
+
+    if thumb_analysis.get("issues"):
+        scores["썸네일"] = {"s": "개선", "c": "#f59e0b", "d": f"{len(thumb_analysis['issues'])}건"}
+    else:
+        scores["썸네일"] = {"s": "양호", "c": "#22c55e", "d": "OK"}
+
+    if our_rank <= 5:
+        scores["순위"] = {"s": "상위", "c": "#22c55e", "d": f"{our_rank}위"}
+    elif our_rank <= 15:
+        scores["순위"] = {"s": "보통", "c": "#f59e0b", "d": f"{our_rank}위"}
+    else:
+        scores["순위"] = {"s": "하위", "c": "#ef4444", "d": f"{our_rank}위"}
+
+    # 점수 배지 HTML (인라인)
+    score_badges = ""
+    for label, info in scores.items():
+        score_badges += f'<div style="text-align:center; min-width:52px;"><div style="width:10px; height:10px; border-radius:50%; background:{info["c"]}; margin:0 auto 2px;"></div><div style="font-size:0.58rem; color:#94a3b8;">{label}</div><div style="font-size:0.68rem; font-weight:700;">{info["s"]}</div><div style="font-size:0.55rem; color:#94a3b8;">{info["d"]}</div></div>'
+
+    # 헤더 + 점수 한 줄
+    img_html = f'<img src="{our_image}" style="width:50px; height:50px; border-radius:6px; object-fit:cover;">' if our_image else ''
+    link_html = f' · <a href="{our_link}" target="_blank" style="font-size:0.7rem; color:#3b82f6;">상품페이지↗</a>' if our_link and our_link != "#" else ''
+
+    st.markdown(f"""
+    <div style="display:flex; align-items:center; gap:0.8rem; padding:0.5rem 0;">
+        {img_html}
+        <div style="flex:1; min-width:0;">
+            <div style="font-size:0.8rem; font-weight:700;">🏪 {our_mall} · {our_rank}위 · {our_price:,}원{link_html}</div>
+            <div style="font-size:0.68rem; color:#64748b; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">{our_name}</div>
+        </div>
+        <div style="display:flex; gap:0.4rem; flex-shrink:0;">
+            {score_badges}
+        </div>
+    </div>
+    """, unsafe_allow_html=True)
+
+    st.divider()
+
+    # ════════════════════════════════════════
+    # SECTION 2: TOP 액션 (2열 그리드)
+    # ════════════════════════════════════════
+    st.markdown("##### 🚀 지금 바로 해야 할 일")
+
+    top_actions = []
+
+    # 긴급 액션
+    if scores.get("가격", {}).get("c") == "#ef4444" and price_analysis.get("경쟁사"):
+        cheapest = price_analysis["경쟁사"][0]
+        top_actions.append({
+            "priority": "긴급", "bg": "#fff5f5", "border": "#f5576c",
+            "title": "💰 가격 경쟁력 확보",
+            "action": f"개당 {price_analysis['우리_개당가격']:,}원 → {cheapest['개당가격']:,}원 이하",
+        })
+    if title_analysis.get("issues"):
+        top_actions.append({
+            "priority": "긴급", "bg": "#fff5f5", "border": "#f5576c",
+            "title": "📝 상품명 SEO 수정",
+            "action": " / ".join(title_analysis["issues"][:2])[:60],
+        })
+
+    # 중요 액션
+    top_actions.append({
+        "priority": "중요", "bg": "#fffbeb", "border": "#f59e0b",
+        "title": "🏷️ 가격 앵커링 적용",
+        "action": "원가 취소선 + 할인가 + 개당단가 상단 배치",
+    })
+    top_actions.append({
+        "priority": "중요", "bg": "#fffbeb", "border": "#f59e0b",
+        "title": "👥 사회적 증거 배지",
+        "action": "판매량·리뷰·인증 배지를 상단에 배치",
+    })
+
+    # 권장 액션
+    top_actions.append({
+        "priority": "권장", "bg": "#f0fdf4", "border": "#22c55e",
+        "title": "⏰ FOMO 요소 적용",
+        "action": "당일출고 마감·재고임박·한정 프로모션",
+    })
+    top_actions.append({
+        "priority": "권장", "bg": "#f0fdf4", "border": "#22c55e",
+        "title": "🔘 CTA 버튼 최적화",
+        "action": "혜택 포함 문구 + 중간·하단 반복 배치",
+    })
+
+    # 2열 그리드로 렌더링
+    _act_cols = st.columns(2)
+    for i, act in enumerate(top_actions):
+        with _act_cols[i % 2]:
+            st.markdown(f"""
+            <div style="padding:0.45rem 0.7rem; margin-bottom:0.35rem; border-radius:6px; background:{act['bg']}; border-left:3px solid {act['border']};">
+                <div style="display:flex; align-items:center; gap:0.3rem;">
+                    <span style="font-size:0.55rem; font-weight:700; color:#fff; background:{act['border']}; padding:0.08rem 0.3rem; border-radius:3px;">{act['priority']}</span>
+                    <span style="font-weight:700; font-size:0.78rem;">{act['title']}</span>
+                </div>
+                <div style="margin-top:0.15rem; font-size:0.72rem; color:#475569;">{act['action']}</div>
+            </div>
+            """, unsafe_allow_html=True)
+
+    # ════════════════════════════════════════
+    # SECTION 4: 상세 분석 탭
+    # ════════════════════════════════════════
+    st.markdown("")
+    st.markdown("#### 📋 상세 분석")
+
+    tab_price, tab_product, tab_cta, tab_review = st.tabs([
+        "💰 가격 분석", "📝 상품명·썸네일", "🎯 CTA 전략", "💬 리뷰"
+    ])
+
+    # ── 탭 1: 가격 분석 ──
+    with tab_price:
+        if price_analysis.get("우리_개당가격"):
+            our_unit = price_analysis["우리_개당가격"]
+            our_qty = price_analysis["우리_수량"]
+            st.metric("우리 개당 단가", f"{our_unit:,}원", f"{our_price:,}원 ÷ {our_qty}개")
+
+            comps = price_analysis.get("경쟁사", [])
+            if comps:
+                table_rows = [{"구분": "🏪 우리", "판매처": our_mall, "가격": f"{our_price:,}원", "수량": f"{our_qty}개", "개당가격": f"{our_unit:,}원"}]
+                for comp in comps[:4]:
+                    table_rows.append({
+                        "구분": f"{comp['순위']}위",
+                        "판매처": comp["판매처"],
+                        "가격": f"{comp['가격']:,}원",
+                        "수량": f"{comp['수량']}개",
+                        "개당가격": f"{comp['개당가격']:,}원",
+                    })
+                st.dataframe(pd.DataFrame(table_rows), use_container_width=True, hide_index=True)
+        else:
+            st.info("상품명에서 수량 정보를 추출할 수 없어 개당 가격 비교가 어렵습니다.")
+
+        # 앵커링 전략
+        st.markdown("**💡 가격 앵커링 적용 방법**")
+        for item in cta["anchoring"]["items"]:
+            st.markdown(f"**{item['type']}** — {item['action']}")
+            st.caption(item["detail"])
+
+    # ── 탭 2: 상품명·썸네일 ──
+    with tab_product:
+        category = title_analysis.get("category", "일반")
+        found_specs = title_analysis.get("found_specs", [])
+        issues = title_analysis.get("issues", [])
+        suggestions = title_analysis.get("suggestions", [])
+        diff_tips = title_analysis.get("diff_tips", [])
+
+        # --- 상품명 진단 카드 ---
+        if category != "일반":
+            st.markdown(f"<div style='display:inline-block; padding:0.2rem 0.6rem; border-radius:12px; background:#e8f4fd; color:#0369a1; font-size:0.75rem; font-weight:600; margin-bottom:0.5rem;'>📂 카테고리: {category}</div>", unsafe_allow_html=True)
+
+        p_cols = st.columns(2)
+        with p_cols[0]:
+            st.markdown("##### 📝 상품명 진단")
+
+            # 즉시 수정 필요 (빨간 카드)
+            if issues:
+                for issue in issues:
+                    st.markdown(f"""
+                    <div style="padding:0.6rem 0.8rem; margin-bottom:0.4rem; border-radius:8px; background:#fef2f2; border-left:4px solid #ef4444;">
+                        <div style="display:flex; align-items:center; gap:0.4rem;">
+                            <span style="font-size:0.6rem; font-weight:700; color:#fff; background:#ef4444; padding:0.1rem 0.35rem; border-radius:3px;">즉시수정</span>
+                            <span style="font-size:0.82rem; font-weight:600;">{issue}</span>
+                        </div>
+                    </div>
+                    """, unsafe_allow_html=True)
+
+            # 포함된 스펙 (초록 체크)
+            if found_specs:
+                specs_html = " ".join([f"<span style='display:inline-block; padding:0.15rem 0.4rem; margin:0.1rem; border-radius:4px; background:#f0fdf4; color:#16a34a; font-size:0.72rem; border:1px solid #bbf7d0;'>✅ {s}</span>" for s in found_specs])
+                st.markdown(f"<div style='margin:0.3rem 0;'>{specs_html}</div>", unsafe_allow_html=True)
+
+            # 개선 권장 (노란 카드)
+            if suggestions:
+                for sug in suggestions:
+                    st.markdown(f"""
+                    <div style="padding:0.5rem 0.8rem; margin-bottom:0.3rem; border-radius:8px; background:#fffbeb; border-left:4px solid #f59e0b;">
+                        <div style="display:flex; align-items:center; gap:0.4rem;">
+                            <span style="font-size:0.6rem; font-weight:700; color:#fff; background:#f59e0b; padding:0.1rem 0.35rem; border-radius:3px;">개선권장</span>
+                            <span style="font-size:0.8rem;">{sug}</span>
+                        </div>
+                    </div>
+                    """, unsafe_allow_html=True)
+
+            if not issues and not suggestions:
+                st.markdown("""
+                <div style="padding:0.6rem 0.8rem; border-radius:8px; background:#f0fdf4; border-left:4px solid #22c55e;">
+                    <span style="font-size:0.85rem; font-weight:600;">✅ 상품명 구성 양호</span>
+                </div>
+                """, unsafe_allow_html=True)
+
+        with p_cols[1]:
+            st.markdown("##### 📸 썸네일 진단")
+            if our_image:
+                st.image(our_image, width=120)
+
+            thumb_issues = thumb_analysis.get("issues", [])
+            thumb_sugs = thumb_analysis.get("suggestions", [])
+
+            for issue in thumb_issues:
+                st.markdown(f"""
+                <div style="padding:0.5rem 0.8rem; margin-bottom:0.3rem; border-radius:8px; background:#fef2f2; border-left:4px solid #ef4444;">
+                    <div style="display:flex; align-items:center; gap:0.4rem;">
+                        <span style="font-size:0.6rem; font-weight:700; color:#fff; background:#ef4444; padding:0.1rem 0.35rem; border-radius:3px;">즉시수정</span>
+                        <span style="font-size:0.8rem;">{issue}</span>
+                    </div>
+                </div>
+                """, unsafe_allow_html=True)
+
+            for sug in thumb_sugs:
+                st.markdown(f"""
+                <div style="padding:0.5rem 0.8rem; margin-bottom:0.3rem; border-radius:8px; background:#fffbeb; border-left:4px solid #f59e0b;">
+                    <div style="display:flex; align-items:center; gap:0.4rem;">
+                        <span style="font-size:0.6rem; font-weight:700; color:#fff; background:#f59e0b; padding:0.1rem 0.35rem; border-radius:3px;">개선권장</span>
+                        <span style="font-size:0.8rem;">{sug}</span>
+                    </div>
+                </div>
+                """, unsafe_allow_html=True)
+
+        # --- 차별화 전략 (하단 풀와이드) ---
+        if diff_tips:
+            st.markdown("")
+            st.markdown("##### 🎯 카테고리 맞춤 차별화 전략")
+            dt_cols = st.columns(min(len(diff_tips), 3))
+            for i, tip in enumerate(diff_tips):
+                with dt_cols[i % len(dt_cols)]:
+                    st.markdown(f"""
+                    <div style="padding:0.6rem 0.8rem; border-radius:8px; background:linear-gradient(135deg, #eff6ff, #f0f9ff); border:1px solid #bfdbfe; height:100%;">
+                        <div style="font-size:0.8rem; color:#1e40af;">💎 {tip}</div>
+                    </div>
+                    """, unsafe_allow_html=True)
+
+    # ── 탭 3: CTA 전략 ──
+    with tab_cta:
+        st.caption("📚 Kakuko et al.(2024) · Deng(2024) 논문 기반 분석")
+
+        _cta_sections = [
+            ("social_proof", "사회적 증거", "👥", "#8b5cf6", "#f5f3ff", "#ede9fe"),
+            ("fomo", "FOMO 전략", "⏰", "#ef4444", "#fef2f2", "#fee2e2"),
+            ("cart_abandon", "장바구니 이탈 방지", "🛒", "#f59e0b", "#fffbeb", "#fef3c7"),
+            ("cta_button", "CTA 버튼 최적화", "🔘", "#06b6d4", "#ecfeff", "#cffafe"),
+        ]
+
+        for section_key, section_title, section_icon, accent, bg, bg2 in _cta_sections:
+            st.markdown(f"""
+            <div style="padding:0.5rem 0.8rem; margin:0.8rem 0 0.4rem; border-radius:8px; background:{bg}; border-left:4px solid {accent};">
+                <span style="font-size:1rem;">{section_icon}</span>
+                <span style="font-size:0.9rem; font-weight:700; color:{accent}; margin-left:0.3rem;">{section_title}</span>
+            </div>
+            """, unsafe_allow_html=True)
+
+            for item in cta[section_key]["items"]:
+                item_type = item.get("type", "")
+                example = item.get("example", "")
+
+                st.markdown(f"""
+                <div style="padding:0.6rem 0.8rem; margin:0.3rem 0 0.3rem 1rem; border-radius:8px; background:#fff; border:1px solid rgba(128,128,128,0.12);">
+                    <div style="font-weight:700; font-size:0.82rem; color:#334155; margin-bottom:0.2rem;">{item_type}</div>
+                    <div style="font-size:0.78rem; color:#475569; margin-bottom:0.3rem;">{item['action']}</div>
+                    <div style="font-size:0.68rem; color:#94a3b8; margin-bottom:0.3rem;">📖 {item['detail']}</div>
+                    {f'<div style="padding:0.4rem 0.6rem; border-radius:6px; background:{bg2}; border:1px dashed {accent}40; font-size:0.76rem; color:#1e293b;"><b>✍️ 적용 문구 예시:</b> {example}</div>' if example else ''}
+                </div>
+                """, unsafe_allow_html=True)
+
+    # ── 탭 4: 리뷰 ──
+    with tab_review:
+        if detail_data_extra and not detail_data_extra.get("error"):
+            info_cols = st.columns(3)
+            info_cols[0].markdown(f"**스토어:** {detail_data_extra.get('store_name', '-')}")
+            info_cols[1].markdown(f"**카테고리:** {detail_data_extra.get('category', '-')}")
+            info_cols[2].markdown(f"**상태:** {detail_data_extra.get('status', '-')}")
+            st.markdown("")
+
+        if review_summary["pros"] or review_summary["cons"]:
+            rv_cols = st.columns(2)
+            with rv_cols[0]:
+                st.markdown("**👍 장점**")
+                for p in review_summary["pros"]:
+                    st.markdown(f"&nbsp;&nbsp;{p}")
+                if not review_summary["pros"]:
+                    st.caption("추출된 장점 없음")
+            with rv_cols[1]:
+                st.markdown("**👎 단점**")
+                for c in review_summary["cons"]:
+                    st.markdown(f"&nbsp;&nbsp;{c}")
+                if not review_summary["cons"]:
+                    st.caption("추출된 단점 없음")
+            if blog_reviews:
+                st.markdown("**📝 출처**")
+                for b in blog_reviews[:2]:
+                    st.markdown(f"[{b['title'][:40]}...]({b['link']})")
+        else:
+            st.info("블로그 리뷰 데이터가 없습니다.")
 
 
 
@@ -1656,7 +2308,7 @@ weekday_kr = weekdays[today.weekday()]
 
 st.markdown(f"""
 <div class="header-banner">
-    <div class="logo">👶</div>
+    <div class="logo"><div class="kb-text">KINI<br>BINI</div><div class="kb-sub">Momsbebe Premium</div></div>
     <div>
         <h1>신아인터네셔날 업무 대시보드</h1>
         <p>실시간 가격 모니터링 · 매출/재고 현황 · 업무 일지</p>
@@ -1861,8 +2513,8 @@ if current_page == "dashboard":
 # ─────────────────────────────────────────────
 # 🚨 판매 대응 페이지
 # ─────────────────────────────────────────────
-elif current_page == "sales_action":
-    st.markdown('<div class="section-title"><span class="icon">🚨</span> 판매 대응 필요 상품</div>', unsafe_allow_html=True)
+elif current_page == "sales_inventory":
+    st.markdown('<div class="section-title"><span class="icon">📦</span> 판매대응 및 재고</div>', unsafe_allow_html=True)
 
     insight_data = fetch_sales_insight()
     product_names_map = fetch_product_names()
@@ -1912,14 +2564,17 @@ elif current_page == "sales_action":
         # ── 판매처별 주문 데이터 수집 (최근 7일, 캐시) ──
         from collections import defaultdict, Counter
 
-        @st.cache_data(ttl=300, show_spinner=False)
+        @st.cache_data(ttl=600, show_spinner=False)
         def _build_order_product_shops(_shop_list_tuple):
             """주문 데이터를 집계하여 {product_id: {shop_name: {qty, amount, order_count, shop_product_ids}}} 반환"""
             shop_dict = dict(_shop_list_tuple)
             result = {}
-            for days_ago in range(1, 8):
-                date_str = (datetime.now() - timedelta(days=days_ago)).strftime("%Y-%m-%d")
-                orders = fetch_orders_by_date(date_str)
+            date_strings = tuple(
+                (datetime.now() - timedelta(days=d)).strftime("%Y-%m-%d") for d in range(1, 8)
+            )
+            all_date_orders = fetch_orders_parallel(date_strings)
+            for date_str in date_strings:
+                orders = all_date_orders.get(date_str, [])
                 for order in orders:
                     shop_id = order.get("shop_id", "")
                     if not shop_id:
@@ -1955,35 +2610,6 @@ elif current_page == "sales_action":
 
         order_product_shops = _build_order_product_shops(tuple(sorted(shop_list.items())))
 
-        # 판매처 URL 생성 헬퍼
-        def build_shop_url(shop_name: str, shop_product_id: str) -> str:
-            sn = shop_name.lower()
-            if "스토어팜" in shop_name or "네이버" in sn:
-                if "맘스베베" in shop_name:
-                    return f"https://smartstore.naver.com/momsbebe/products/{shop_product_id}"
-                elif "키니비니" in shop_name:
-                    return f"https://smartstore.naver.com/kinibini/products/{shop_product_id}"
-                elif "키니공식" in shop_name:
-                    return f"https://smartstore.naver.com/kinibini_official/products/{shop_product_id}"
-                return f"https://smartstore.naver.com/main/products/{shop_product_id}"
-            elif "11번가" in shop_name:
-                return f"https://www.11st.co.kr/products/{shop_product_id}"
-            elif "쿠팡" in shop_name:
-                return f"https://www.coupang.com/vp/products/{shop_product_id}"
-            elif "g마켓" in sn:
-                return f"https://item.gmarket.co.kr/Item?goodscode={shop_product_id}"
-            elif "옥션" in shop_name:
-                return f"https://itempage3.auction.co.kr/DetailView.aspx?ItemNo={shop_product_id}"
-            elif "롯데" in shop_name:
-                return f"https://www.lotteon.com/p/product/{shop_product_id}"
-            elif "신세계" in shop_name or "이마트" in shop_name or "ssg" in sn:
-                return f"https://www.ssg.com/item/itemView.ssg?itemId={shop_product_id}"
-            elif "카카오" in shop_name:
-                return f"https://store.kakao.com/products/{shop_product_id}"
-            elif "토스" in shop_name:
-                return f"https://commerce.toss.im/products/{shop_product_id}"
-            return ""
-
         # 판매처 팝업 데이터 준비 헬퍼
         def _prepare_shop_data(pid, name, item=None):
             pid_shops = order_product_shops.get(pid, {})
@@ -2005,93 +2631,37 @@ elif current_page == "sales_action":
                 "shop_summary": shop_summary,
             }
 
-        # 판매처 상세 팝업
-        @st.dialog("🛒 판매처별 판매 현황", width="large")
-        def show_shop_detail_dialog():
-            data = st.session_state.get("_shop_detail_data", {})
-            if not data:
-                st.warning("데이터를 불러올 수 없습니다.")
-                return
-
-            p_name = data.get("product_name", "")
-            p_id = data.get("product_id", "")
-            brand = data.get("brand", "")
-            avg_qty = data.get("avg_qty", 0)
-            today_shipped = data.get("today_shipped")
-            shop_summary = data.get("shop_summary", "")
-            shops_info = data.get("shops", [])
-            total_qty = sum(s["qty"] for s in shops_info)
-            total_amount = sum(s["amount"] for s in shops_info)
-            total_orders = sum(s["order_count"] for s in shops_info)
-
-            # ── 상단 요약 영역 ──
-            today_badge = ""
-            if today_shipped is True:
-                today_badge = " · ✅ 오늘출고"
-            elif today_shipped is False:
-                today_badge = " · ❌ 미출고"
-            summary_line = f"**{brand}** | {p_name} — 일평균 **{avg_qty}개**{today_badge}"
-            if shop_summary:
-                summary_line += f" | 🛒 {shop_summary}"
-            st.markdown(summary_line)
-            st.divider()
-
-            # ── KPI 지표 ──
-            hc = st.columns(4)
-            hc[0].metric("상품코드", p_id)
-            hc[1].metric("총 판매수량", f"{total_qty}개")
-            hc[2].metric("총 주문건수", f"{total_orders}건")
-            hc[3].metric("총 매출액", f"{total_amount:,}원")
-
-            # ── 판매처 테이블 ──
-            rows = []
-            for shop in shops_info:
-                pct = round(shop["qty"] / total_qty * 100, 1) if total_qty else 0
-                url_text = shop["urls"][0] if shop["urls"] else ""
-                rows.append({
-                    "판매처": shop["name"], "판매수량": shop["qty"], "점유율(%)": pct,
-                    "주문건수": shop["order_count"], "매출액": shop["amount"], "상품URL": url_text,
-                })
-            st.dataframe(
-                pd.DataFrame(rows), use_container_width=True, hide_index=True,
-                column_config={
-                    "판매처": st.column_config.TextColumn("판매처", width="medium"),
-                    "판매수량": st.column_config.NumberColumn("판매수량", format="%d개"),
-                    "점유율(%)": st.column_config.ProgressColumn("점유율", min_value=0, max_value=100, format="%.0f%%"),
-                    "주문건수": st.column_config.NumberColumn("주문건수", format="%d건"),
-                    "매출액": st.column_config.NumberColumn("매출액", format="%d원"),
-                    "상품URL": st.column_config.LinkColumn("상품페이지", display_text="열기 ↗"),
-                },
-                height=min(len(rows) * 40 + 60, 400),
-            )
-
         # ── 상품 리스트 렌더링 헬퍼 (4개 탭 공용) ──
         def _render_product_list(products, tab_prefix, show_today_col=False):
-            """products: list of dict — 테이블 + selectbox → 판매처 팝업"""
+            """products: list of dict — 테이블 행 클릭 → 판매처 팝업"""
             if not products:
                 st.info("해당 상품이 없습니다.")
                 return
 
             # 테이블 데이터 구성
             table_rows = []
-            product_map = {}  # "상품코드 | 상품명" → item
+            items_list = []  # 인덱스 기반 접근
+            product_map = {}  # 상품명 → item
             for item in products:
                 pid = item["product_id"]
                 name = product_names_map.get(pid, pid)
                 brand = extract_brand(name)
+                avg_qty = int(item.get("avg_qty", 0) or 0)
                 row = {
-                    "브랜드": brand,
-                    "상품코드": pid,
-                    "상품명": name,
-                    "일평균": item.get("avg_qty", 0),
+                    "브랜드": str(brand),
+                    "상품코드": str(pid),
+                    "상품명": str(name),
+                    "일평균": avg_qty,
                     "출고일수": f"{item.get('active_days', 0)}/{item.get('total_days', 7)}일",
                 }
                 if show_today_col:
                     row["오늘출고"] = "✅" if item.get("today_shipped") else "❌"
                 table_rows.append(row)
-                product_map[f"{pid} | {name}"] = item
+                items_list.append(item)
+                product_map[name] = item
 
             df = pd.DataFrame(table_rows)
+            df["일평균"] = df["일평균"].astype(int)
 
             col_config = {
                 "브랜드": st.column_config.TextColumn("브랜드", width="small"),
@@ -2110,21 +2680,31 @@ elif current_page == "sales_action":
                 height=min(len(table_rows) * 35 + 60, 600),
             )
 
-            # 상품 선택 → 판매처 상세 팝업
+            # 상품 검색/선택 → 판매처 상세
+            product_names_list = list(product_map.keys())
+
+            # 업무보드에서 바로 이동 시 자동 선택
+            _auto_pid = st.session_state.pop("auto_select_product", None)
+            _default_name = ""
+            if _auto_pid:
+                _auto_name = product_names_map.get(_auto_pid, _auto_pid)
+                if _auto_name in product_map:
+                    _default_name = _auto_name
+                    st.session_state[f"{tab_prefix}_select"] = _default_name
+
             sel_cols = st.columns([4, 1])
             with sel_cols[0]:
-                options = list(product_map.keys())
-                selected = st.selectbox(
-                    "🔍 상품 선택 (판매처 상세 보기)",
-                    options=[""] + options,
-                    format_func=lambda x: "상품을 선택하세요..." if x == "" else x,
+                selected_name = st.selectbox(
+                    "상품 선택",
+                    options=[""] + product_names_list,
+                    format_func=lambda x: "🔍 상품명을 입력하여 검색..." if x == "" else x,
                     key=f"{tab_prefix}_select",
                     label_visibility="collapsed",
                 )
             with sel_cols[1]:
-                btn_disabled = (selected == "" or selected not in product_map)
+                btn_disabled = (selected_name == "" or selected_name not in product_map)
                 if st.button("📊 판매처 상세", key=f"{tab_prefix}_btn", use_container_width=True, disabled=btn_disabled):
-                    sel_item = product_map[selected]
+                    sel_item = product_map[selected_name]
                     sel_pid = sel_item["product_id"]
                     sel_name = product_names_map.get(sel_pid, sel_pid)
                     shop_data = _prepare_shop_data(sel_pid, sel_name, sel_item)
@@ -2134,12 +2714,21 @@ elif current_page == "sales_action":
                     else:
                         st.toast(f"{sel_name}: 최근 7일 주문 데이터 없음")
 
-        # ═══ 4개 탭 ═══
-        tab_all, tab_today, tab_anomaly, tab_dormant = st.tabs([
-            f"📊 전체 출고 상품 ({insight_data['total_tracked']})",
+        # ═══ 탭 (판매대응 + 재고 통합) ═══
+        inventory_data = fetch_current_inventory()
+        all_brands = set()
+        for name in product_names_map.values():
+            all_brands.add(extract_brand(name))
+        total_all_sku = len(product_names_map)
+
+        tab_all, tab_today, tab_anomaly, tab_dormant, tab_sku, tab_low, tab_brand = st.tabs([
+            f"📊 최근 5일 출고 ({insight_data['total_tracked']})",
             f"📦 오늘 출고 ({insight_data['today_count']})",
             f"🚨 판매 대응 필요 ({len(anomalies)})",
             f"💤 오늘 미출고 ({dormant_count})",
+            f"🏷️ 전체 SKU ({total_all_sku})",
+            f"⚠️ 재고 부족 ({inventory_data['low_stock_count']})",
+            f"🏷️ 브랜드별 ({len(all_brands)})",
         ])
 
         with tab_all:
@@ -2167,147 +2756,73 @@ elif current_page == "sales_action":
             else:
                 st.success("✅ 모든 상품이 오늘 정상 출고되었습니다.")
 
+        with tab_sku:
+            stock_map = {}
+            for item in inventory_data.get("items", []):
+                stock_map[item["product_id"]] = item
+            rows = []
+            for pid, name in sorted(product_names_map.items(), key=lambda x: x[1]):
+                brand = extract_brand(name)
+                stock_info = stock_map.get(pid)
+                if stock_info:
+                    rows.append({"브랜드": brand, "상품코드": pid, "상품명": name, "재고수량": str(stock_info["stock_qty"]), "출고량": str(stock_info["trans_qty"]), "오늘변동": "O"})
+                else:
+                    rows.append({"브랜드": brand, "상품코드": pid, "상품명": name, "재고수량": "—", "출고량": "—", "오늘변동": ""})
+            st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True, height=600)
+
+        with tab_low:
+            low = inventory_data.get("low_items", [])
+            low_sorted = sorted(low, key=lambda x: x["stock_qty"])
+            if low_sorted:
+                rows = []
+                for item in low_sorted:
+                    pid = item["product_id"]
+                    name = product_names_map.get(pid, pid)
+                    brand = extract_brand(name)
+                    if item["stock_qty"] < 0:
+                        status = "⛔ 마이너스"
+                    elif item["stock_qty"] == 0:
+                        status = "🔴 품절"
+                    else:
+                        status = "🔴 부족"
+                    rows.append({"브랜드": brand, "상품코드": pid, "상품명": name, "재고수량": item["stock_qty"], "출고량": item["trans_qty"], "상태": status})
+                st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True,
+                              column_config={"재고수량": st.column_config.NumberColumn(format="%d개")},
+                              height=600)
+            else:
+                st.success("✅ 재고 부족 품목이 없습니다.")
+
+        with tab_brand:
+            from collections import defaultdict as _dd
+            brand_inv = _dd(lambda: {"품목수": 0, "출고품목": 0, "총출고": 0, "부족": 0, "품절": 0})
+            for pid, name in product_names_map.items():
+                brand = extract_brand(name)
+                brand_inv[brand]["품목수"] += 1
+            stock_map = {}
+            for item in inventory_data.get("items", []):
+                stock_map[item["product_id"]] = item
+            for pid, name in product_names_map.items():
+                brand = extract_brand(name)
+                stock_info = stock_map.get(pid)
+                if stock_info:
+                    brand_inv[brand]["출고품목"] += 1
+                    brand_inv[brand]["총출고"] += abs(stock_info["trans_qty"])
+                    if stock_info["stock_qty"] <= 0:
+                        brand_inv[brand]["품절"] += 1
+                    elif stock_info["stock_qty"] <= 10:
+                        brand_inv[brand]["부족"] += 1
+            rows = []
+            for brand, info in sorted(brand_inv.items(), key=lambda x: -x[1]["총출고"]):
+                rows.append({
+                    "브랜드": brand, "총 SKU": info["품목수"], "오늘 출고 품목": info["출고품목"],
+                    "총 출고량": info["총출고"], "재고 부족": info["부족"], "품절": info["품절"],
+                })
+            st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+
     elif insight_data["status"] == "미연동":
         st.info("📡 원싱크(OneWMS) API 연동 후 판매 대응 분석이 가능합니다.")
     else:
         st.info(f"📊 판매 인사이트: {insight_data['status']}")
-
-
-# ─────────────────────────────────────────────
-# 📦 재고 현황 페이지
-# ─────────────────────────────────────────────
-elif current_page == "inventory":
-    st.markdown('<div class="section-title"><span class="icon">📦</span> 재고 현황</div>', unsafe_allow_html=True)
-
-    product_names = fetch_product_names()
-    total_all_sku = len(product_names)
-    inventory_data = fetch_current_inventory()
-    inv_connected = inventory_data["status"] == "연동 완료"
-
-    # KPI 요약
-    inv_cols = st.columns(4)
-    inv_cols[0].markdown(f"""
-    <div class="kpi-card">
-        <div class="icon">🏷️</div>
-        <div class="label">총 SKU 수</div>
-        <div class="value">{total_all_sku}개</div>
-        <div class="sub">관리 중</div>
-    </div>
-    """, unsafe_allow_html=True)
-    inv_cols[1].markdown(f"""
-    <div class="kpi-card">
-        <div class="icon">📦</div>
-        <div class="label">오늘 출고 품목</div>
-        <div class="value">{inventory_data['total_sku']}개</div>
-        <div class="sub">오늘 변동</div>
-    </div>
-    """, unsafe_allow_html=True)
-    inv_cols[2].markdown(f"""
-    <div class="kpi-card">
-        <div class="icon">⚠️</div>
-        <div class="label">재고 부족 품목</div>
-        <div class="value">{inventory_data['low_stock_count']}개</div>
-        <div class="sub">10개 이하</div>
-    </div>
-    """, unsafe_allow_html=True)
-    # 브랜드 수 계산
-    all_brands = set()
-    for name in product_names.values():
-        all_brands.add(extract_brand(name))
-    inv_cols[3].markdown(f"""
-    <div class="kpi-card">
-        <div class="icon">🏷️</div>
-        <div class="label">브랜드 수</div>
-        <div class="value">{len(all_brands)}개</div>
-        <div class="sub">활성 브랜드</div>
-    </div>
-    """, unsafe_allow_html=True)
-
-    # ── 보기 모드 선택 ──
-    view_mode = st.radio("보기 모드", ["전체 SKU", "오늘 출고 상품", "재고 부족 품목", "브랜드별 요약"], horizontal=True)
-
-    if view_mode == "전체 SKU":
-        st.markdown(f"**총 {total_all_sku}개 SKU 등록**")
-        stock_map = {}
-        for item in inventory_data.get("items", []):
-            stock_map[item["product_id"]] = item
-        rows = []
-        for pid, name in sorted(product_names.items(), key=lambda x: x[1]):
-            brand = extract_brand(name)
-            stock_info = stock_map.get(pid)
-            if stock_info:
-                rows.append({"브랜드": brand, "상품코드": pid, "상품명": name, "재고수량": stock_info["stock_qty"], "출고량": stock_info["trans_qty"], "오늘변동": "O"})
-            else:
-                rows.append({"브랜드": brand, "상품코드": pid, "상품명": name, "재고수량": "—", "출고량": "—", "오늘변동": ""})
-        st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True, height=600)
-
-    elif view_mode == "오늘 출고 상품":
-        items = inventory_data.get("items", [])
-        items_sorted = sorted(items, key=lambda x: product_names.get(x["product_id"], x["product_id"]))
-        st.markdown(f"**오늘 변동 {len(items_sorted)}개 품목**")
-        rows = []
-        for item in items_sorted:
-            pid = item["product_id"]
-            name = product_names.get(pid, pid)
-            brand = extract_brand(name)
-            status = "🔴 부족" if item["stock_qty"] <= 10 else ("🟡 주의" if item["stock_qty"] <= 30 else "🟢 정상")
-            rows.append({"브랜드": brand, "상품코드": pid, "상품명": name, "재고수량": item["stock_qty"], "출고량": item["trans_qty"], "상태": status})
-        st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True, height=600)
-
-    elif view_mode == "재고 부족 품목":
-        low = inventory_data.get("low_items", [])
-        low_sorted = sorted(low, key=lambda x: x["stock_qty"])
-        st.markdown(f"**총 {len(low_sorted)}개 품목** — 긴급 발주 검토 필요")
-        rows = []
-        for item in low_sorted:
-            pid = item["product_id"]
-            name = product_names.get(pid, pid)
-            brand = extract_brand(name)
-            if item["stock_qty"] < 0:
-                status = "⛔ 마이너스"
-            elif item["stock_qty"] == 0:
-                status = "🔴 품절"
-            else:
-                status = "🔴 부족"
-            rows.append({"브랜드": brand, "상품코드": pid, "상품명": name, "재고수량": item["stock_qty"], "출고량": item["trans_qty"], "상태": status})
-        if rows:
-            st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True,
-                          column_config={"재고수량": st.column_config.NumberColumn(format="%d개")},
-                          height=600)
-        else:
-            st.success("✅ 재고 부족 품목이 없습니다.")
-
-    elif view_mode == "브랜드별 요약":
-        from collections import defaultdict
-        brand_inv = defaultdict(lambda: {"품목수": 0, "출고품목": 0, "총출고": 0, "부족": 0, "품절": 0})
-        for pid, name in product_names.items():
-            brand = extract_brand(name)
-            brand_inv[brand]["품목수"] += 1
-        stock_map = {}
-        for item in inventory_data.get("items", []):
-            stock_map[item["product_id"]] = item
-        for pid, name in product_names.items():
-            brand = extract_brand(name)
-            stock_info = stock_map.get(pid)
-            if stock_info:
-                brand_inv[brand]["출고품목"] += 1
-                brand_inv[brand]["총출고"] += abs(stock_info["trans_qty"])
-                if stock_info["stock_qty"] <= 0:
-                    brand_inv[brand]["품절"] += 1
-                elif stock_info["stock_qty"] <= 10:
-                    brand_inv[brand]["부족"] += 1
-
-        rows = []
-        for brand, info in sorted(brand_inv.items(), key=lambda x: -x[1]["총출고"]):
-            rows.append({
-                "브랜드": brand,
-                "총 SKU": info["품목수"],
-                "오늘 출고 품목": info["출고품목"],
-                "총 출고량": info["총출고"],
-                "재고 부족": info["부족"],
-                "품절": info["품절"],
-            })
-        st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
 
 
 # ─────────────────────────────────────────────
@@ -2323,18 +2838,25 @@ elif current_page == "price_monitor":
     with search_col2:
         search_btn = st.button("🔍 검색", type="primary", use_container_width=True)
 
-    # 빠른 검색 버튼
-    quick_keywords = ["맘스베베 기저귀", "키니비니 면도기", "일회용 면도기", "아기 물티슈"]
-    qk_cols = st.columns(len(quick_keywords))
-    for i, kw in enumerate(quick_keywords):
-        if qk_cols[i].button(kw, key=f"quick_{i}", use_container_width=True):
-            search_keyword = kw
-            search_btn = True
-
-    # 검색 이력
+    # 최근 검색 이력 (클릭 재검색 + 삭제 기능)
     history = load_search_history()
     if history:
-        st.caption("최근 검색: " + " · ".join(history[:5]))
+        st.caption("최근 검색")
+        hist_cols_per_row = 5
+        for row_start in range(0, min(len(history), 10), hist_cols_per_row):
+            row_items = history[row_start:row_start + hist_cols_per_row]
+            cols = st.columns(len(row_items))
+            for i, kw in enumerate(row_items):
+                with cols[i]:
+                    c1, c2 = st.columns([4, 1])
+                    with c1:
+                        if st.button(f"🔍 {kw}", key=f"hist_{row_start+i}", use_container_width=True):
+                            search_keyword = kw
+                            search_btn = True
+                    with c2:
+                        if st.button("✕", key=f"hist_del_{row_start+i}", use_container_width=True):
+                            remove_from_search_history(kw)
+                            st.rerun()
 
     active_keyword = search_keyword if search_btn and search_keyword else st.session_state.get("active_keyword")
 
@@ -2551,119 +3073,521 @@ elif current_page == "price_monitor":
 elif current_page == "daily_log":
     st.markdown('<div class="section-title"><span class="icon">📝</span> 업무 일지 (Daily Log)</div>', unsafe_allow_html=True)
 
-    today_str = datetime.now().strftime("%Y-%m-%d")
-    all_logs = load_json(DAILY_LOG_FILE, {})
-    today_logs = all_logs.get(today_str, [])
+    # ── 커스텀 CSS ──
+    st.markdown("""
+    <style>
+    .task-card {
+        background: var(--background-color, #fff);
+        border-radius: 10px;
+        padding: 0.7rem 1rem;
+        margin-bottom: 0.5rem;
+        border-left: 4px solid #90a4ae;
+        box-shadow: 0 1px 4px rgba(0,0,0,0.06);
+        transition: all 0.2s;
+    }
+    .task-card:hover { box-shadow: 0 2px 8px rgba(0,0,0,0.12); }
+    .task-card.priority-urgent { border-left-color: #e53935; }
+    .task-card.priority-normal { border-left-color: #1e88e5; }
+    .task-card.priority-routine { border-left-color: #90a4ae; }
+    .task-card.done-task { opacity: 0.55; }
+    .task-card.done-task .task-title { text-decoration: line-through; }
+    .priority-badge {
+        display: inline-block; padding: 1px 8px; border-radius: 8px;
+        font-size: 0.7rem; font-weight: 600; color: #fff; margin-right: 6px;
+    }
+    .priority-badge.urgent { background: #e53935; }
+    .priority-badge.normal { background: #1e88e5; }
+    .priority-badge.routine { background: #90a4ae; }
+    .carry-badge {
+        display: inline-block; padding: 1px 8px; border-radius: 8px;
+        font-size: 0.68rem; font-weight: 500; color: #ff6f00;
+        background: #fff3e0; margin-left: 6px;
+    }
+    .auto-badge {
+        display: inline-block; padding: 1px 8px; border-radius: 8px;
+        font-size: 0.68rem; font-weight: 500; color: #c62828;
+        background: #ffebee; margin-left: 6px;
+    }
+    .progress-container {
+        background: #e0e0e0; border-radius: 10px; height: 22px;
+        overflow: hidden; margin: 0.5rem 0 1rem 0; position: relative;
+    }
+    .progress-fill {
+        height: 100%; border-radius: 10px;
+        background: linear-gradient(90deg, #43a047, #66bb6a);
+        transition: width 0.5s ease;
+    }
+    .progress-text {
+        position: absolute; top: 50%; left: 50%; transform: translate(-50%,-50%);
+        font-size: 0.75rem; font-weight: 600; color: #333;
+    }
+    .cal-grid {
+        display: grid; grid-template-columns: repeat(7, 1fr); gap: 2px;
+        margin: 0.5rem 0;
+    }
+    .cal-header {
+        text-align: center; font-weight: 700; font-size: 0.75rem;
+        padding: 4px 0; color: #666;
+    }
+    .cal-cell {
+        text-align: center; padding: 6px 2px; border-radius: 6px;
+        font-size: 0.78rem; min-height: 38px; cursor: pointer;
+        border: 1px solid #eee; transition: background 0.15s;
+    }
+    .cal-cell:hover { background: #e3f2fd; }
+    .cal-cell.today { background: #e8f5e9; font-weight: 700; border-color: #66bb6a; }
+    .cal-cell.has-tasks { position: relative; }
+    .cal-cell .task-dot {
+        display: inline-block; width: 6px; height: 6px;
+        background: #1e88e5; border-radius: 50%; margin-top: 2px;
+    }
+    .cal-cell.empty { border: none; cursor: default; }
+    .sticky-note {
+        border-radius: 8px; padding: 1rem; min-height: 100px;
+        box-shadow: 2px 3px 10px rgba(0,0,0,0.1);
+        position: relative; margin-bottom: 0.8rem;
+        font-size: 0.88rem; line-height: 1.5;
+    }
+    .sticky-note.rot-1 { transform: rotate(-1.5deg); }
+    .sticky-note.rot-2 { transform: rotate(1deg); }
+    .sticky-note.rot-3 { transform: rotate(-0.5deg); }
+    .sticky-note .note-meta {
+        margin-top: 0.7rem; font-size: 0.72rem; opacity: 0.6;
+        display: flex; justify-content: space-between; align-items: center;
+    }
+    .week-col {
+        background: var(--background-color, #fafafa);
+        border-radius: 8px; padding: 0.5rem;
+        border: 1px solid #eee; min-height: 80px;
+    }
+    .week-col-header {
+        font-weight: 700; font-size: 0.8rem; text-align: center;
+        padding-bottom: 0.3rem; border-bottom: 1px solid #ddd; margin-bottom: 0.4rem;
+    }
+    .week-task-item {
+        font-size: 0.75rem; padding: 2px 4px; border-radius: 4px;
+        margin-bottom: 2px; background: #e3f2fd;
+        white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+    .week-task-item.done { text-decoration: line-through; opacity: 0.5; }
+    </style>
+    """, unsafe_allow_html=True)
 
-    col_form, col_logs = st.columns([3, 2])
+    # ── 데이터 로드 ──
+    now = datetime.now()
+    today_str = now.strftime("%Y-%m-%d")
+    yesterday_str = (now - timedelta(days=1)).strftime("%Y-%m-%d")
 
-    with col_form:
-        with st.form("daily_log_form", clear_on_submit=True):
-            form_top = st.columns([1, 2])
-            with form_top[0]:
-                writer = st.selectbox("작성자", ["MD", "CS", "CEO", "기타"])
-            with form_top[1]:
-                st.markdown(f"<div style='padding-top:1.6rem; font-size:0.85rem; opacity:0.5;'>📅 {today_str} 기록</div>", unsafe_allow_html=True)
+    tasks_data = load_json(TASKS_FILE, {"tasks": []})
+    all_tasks = tasks_data.get("tasks", [])
+    sticky_data = load_json(STICKY_FILE, {"notes": []})
+    all_notes = sticky_data.get("notes", [])
 
-            notable = st.text_area(
-                "🔔 오늘의 특이사항",
-                height=70,
-                placeholder="오늘 발생한 특이사항을 기록하세요...",
-            )
-            competitor = st.text_area(
-                "🏪 경쟁사 동향",
-                height=70,
-                placeholder="경쟁사 가격 변동, 프로모션 등...",
-            )
-            action = st.text_area(
-                "✅ 조치 사항",
-                height=70,
-                placeholder="취한 조치 또는 필요한 조치...",
-            )
-            submitted = st.form_submit_button(
-                "💾 업무 일지 저장",
-                type="primary",
-                use_container_width=True,
+    # ── 헬퍼 함수 ──
+    def save_tasks():
+        save_json(TASKS_FILE, {"tasks": all_tasks})
+
+    def save_notes():
+        save_json(STICKY_FILE, {"notes": all_notes})
+
+    def add_task(title, task_type="daily", priority="normal", due=None, auto=False, writer="MD", meta=None):
+        if due is None:
+            due = today_str
+        new_task = {
+            "id": str(uuid.uuid4()),
+            "title": title,
+            "type": task_type,
+            "priority": priority,
+            "done": False,
+            "created": today_str,
+            "due": due,
+            "done_at": None,
+            "auto": auto,
+            "writer": writer,
+        }
+        if meta:
+            new_task["meta"] = meta
+        all_tasks.append(new_task)
+        save_tasks()
+        return new_task
+
+    def toggle_task(task_id, done_value):
+        for t in all_tasks:
+            if t["id"] == task_id:
+                t["done"] = done_value
+                t["done_at"] = now.strftime("%Y-%m-%d %H:%M") if done_value else None
+                break
+        save_tasks()
+
+    def delete_task(task_id):
+        nonlocal_tasks = [t for t in all_tasks if t["id"] != task_id]
+        all_tasks.clear()
+        all_tasks.extend(nonlocal_tasks)
+        save_tasks()
+
+    # ── 자동 업무 생성 (판매 이상 징후) ──
+    try:
+        insight = fetch_sales_insight()
+        anomalies = insight.get("anomalies", [])
+    except Exception:
+        anomalies = []
+
+    try:
+        _pname_map = fetch_product_names()
+    except Exception:
+        _pname_map = {}
+
+    existing_auto_titles = {t["title"] for t in all_tasks if t.get("auto") and t["due"] == today_str}
+    for anom in anomalies:
+        pid = anom.get("product_id", "")
+        pname = _pname_map.get(pid, pid)
+        avg_qty = anom.get("avg_qty", 0)
+        active_days = anom.get("active_days", 0)
+        total_days = anom.get("total_days", 5)
+        total_qty = anom.get("total_qty", 0)
+        auto_title = f"\U0001f6a8 [{pid}] {pname}"
+        if auto_title not in existing_auto_titles:
+            add_task(
+                auto_title, task_type="daily", priority="urgent",
+                due=today_str, auto=True, writer="MD",
+                meta={
+                    "product_id": pid,
+                    "product_name": pname,
+                    "avg_qty": avg_qty,
+                    "active_days": active_days,
+                    "total_days": total_days,
+                    "total_qty": total_qty,
+                    "reason": f"최근 {total_days}일 중 {active_days}일 출고(일평균 {avg_qty}개) → 오늘 미출고",
+                },
             )
 
-            if submitted:
-                if not (notable or competitor or action):
-                    st.warning("최소 하나의 항목을 입력해주세요.")
-                else:
-                    new_entry = {
-                        "작성자": writer,
-                        "시간": datetime.now().strftime("%H:%M"),
-                        "오늘의 특이사항": notable,
-                        "경쟁사 동향": competitor,
-                        "조치 사항": action,
-                    }
-                    today_logs.append(new_entry)
-                    all_logs[today_str] = today_logs
-                    save_json(DAILY_LOG_FILE, all_logs)
-                    st.success("업무 일지가 저장되었습니다!")
+    # ── 어제 미완료 이월 ──
+    yesterday_incomplete = [t for t in all_tasks if t.get("due") == yesterday_str and not t.get("done")]
+    carried_ids = set()
+    existing_today_titles = {t["title"] for t in all_tasks if t.get("due") == today_str}
+    for t in yesterday_incomplete:
+        carry_title = t["title"]
+        if carry_title not in existing_today_titles:
+            new_t = add_task(carry_title, task_type=t.get("type", "daily"), priority=t.get("priority", "normal"), due=today_str, writer=t.get("writer", "MD"))
+            carried_ids.add(new_t["id"])
+
+    # 오늘 업무 필터
+    today_tasks = [t for t in all_tasks if t.get("due") == today_str]
+    done_count = sum(1 for t in today_tasks if t.get("done"))
+    total_count = len(today_tasks)
+    pct = round((done_count / total_count * 100), 1) if total_count > 0 else 0
+
+    # ── 3 Tabs ──
+    tab1, tab2, tab3 = st.tabs(["\U0001f4c5 오늘 업무", "\U0001f4c6 주간/월간 계획", "\U0001f4cc 공유 메모"])
+
+    # ════════════════════════════════════════════
+    # Tab 1: 오늘 업무
+    # ════════════════════════════════════════════
+    with tab1:
+        st.markdown(f"**완료 {done_count}/{total_count}** — {pct}%")
+        pct_bar = min(pct, 100)
+        st.markdown(f"""
+        <div class="progress-container">
+            <div class="progress-fill" style="width:{pct_bar}%;"></div>
+            <div class="progress-text">{done_count}/{total_count} ({pct}%)</div>
+        </div>
+        """, unsafe_allow_html=True)
+
+        if not today_tasks:
+            st.info("오늘 등록된 업무가 없습니다. 아래에서 새 업무를 추가하세요.")
+
+        for idx, task in enumerate(today_tasks):
+            tid = task["id"]
+            is_done = task.get("done", False)
+            priority = task.get("priority", "normal")
+            title = task.get("title", "")
+            done_at = task.get("done_at")
+            is_auto = task.get("auto", False)
+            is_carried = tid in carried_ids
+            meta = task.get("meta", {})
+
+            priority_label = {"urgent": "긴급", "normal": "일반", "routine": "정기"}.get(priority, "일반")
+            card_class = f"task-card priority-{priority}"
+            if is_done:
+                card_class += " done-task"
+
+            col_chk, col_info = st.columns([0.5, 9.5])
+            with col_chk:
+                new_done = st.checkbox("", value=is_done, key=f"task_chk_{tid}")
+                if new_done != is_done:
+                    toggle_task(tid, new_done)
                     st.rerun()
+            with col_info:
+                badges_html = f'<span class="priority-badge {priority}">{priority_label}</span>'
+                if is_auto:
+                    badges_html += '<span class="auto-badge">자동생성</span>'
+                if is_carried:
+                    badges_html += '<span class="carry-badge">\u23f0 어제 미완료</span>'
 
-    with col_logs:
-        st.markdown(f"**오늘의 기록** · {len(today_logs)}건")
+                done_info = ""
+                if is_done and done_at:
+                    done_info = f'<span style="font-size:0.72rem; opacity:0.5; margin-left:8px;">\u2705 {done_at} 완료</span>'
 
-        if today_logs:
-            for log in reversed(today_logs):
-                role = log['작성자']
-                role_class = {"MD": "role-md", "CS": "role-cs", "CEO": "role-ceo"}.get(role, "role-etc")
+                # ── 자동생성 판매대응 태스크: 확장 카드 UI ──
+                if is_auto and meta:
+                    p_name = meta.get("product_name", "")
+                    p_id = meta.get("product_id", "")
+                    reason = meta.get("reason", "")
+                    avg_q = meta.get("avg_qty", 0)
+                    total_q = meta.get("total_qty", 0)
+                    active_d = meta.get("active_days", 0)
+                    total_d = meta.get("total_days", 5)
 
-                parts = []
-                if log.get("오늘의 특이사항"):
-                    parts.append(f'<div class="log-label">🔔 특이사항</div><div class="log-item">{log["오늘의 특이사항"]}</div>')
-                if log.get("경쟁사 동향"):
-                    parts.append(f'<div class="log-label">🏪 경쟁사</div><div class="log-item">{log["경쟁사 동향"]}</div>')
-                if log.get("조치 사항"):
-                    parts.append(f'<div class="log-label">✅ 조치</div><div class="log-item">{log["조치 사항"]}</div>')
-
-                st.markdown(f"""
-                <div class="log-entry">
-                    <div class="log-header">
-                        <span class="role-badge {role_class}">{role}</span>
-                        <span style="opacity:0.5; font-size:0.8rem;">{log['시간']}</span>
-                    </div>
-                    {''.join(parts)}
-                </div>
-                """, unsafe_allow_html=True)
-        else:
-            st.markdown("""
-            <div class="empty-state" style="padding:1.5rem;">
-                <div class="icon">📋</div>
-                <p>오늘 작성된 업무 일지가 없습니다.</p>
-            </div>
-            """, unsafe_allow_html=True)
-
-        # 과거 일지 열람
-        st.markdown("---")
-        past_dates = sorted([d for d in all_logs.keys() if d != today_str], reverse=True)
-        if past_dates:
-            sel_date = st.selectbox("📂 과거 일지 조회", past_dates, label_visibility="visible")
-            if sel_date:
-                past_logs = all_logs[sel_date]
-                for log in past_logs:
-                    role = log['작성자']
-                    role_class = {"MD": "role-md", "CS": "role-cs", "CEO": "role-ceo"}.get(role, "role-etc")
-                    summary_parts = []
-                    if log.get("오늘의 특이사항"):
-                        summary_parts.append(log["오늘의 특이사항"][:40])
-                    if log.get("경쟁사 동향"):
-                        summary_parts.append(log["경쟁사 동향"][:40])
-                    if log.get("조치 사항"):
-                        summary_parts.append(log["조치 사항"][:40])
                     st.markdown(f"""
-                    <div class="log-entry" style="padding:0.7rem 1rem;">
-                        <div class="log-header" style="margin-bottom:0.2rem;">
-                            <span class="role-badge {role_class}">{role}</span>
-                            <span style="opacity:0.5; font-size:0.8rem;">{log['시간']}</span>
+                    <div class="{card_class}" style="padding:0.6rem 0.8rem;">
+                        <div style="display:flex; align-items:center; gap:6px; flex-wrap:wrap;">
+                            {badges_html}
+                            <span style="font-weight:700; font-size:0.92rem;">\U0001f6a8 {p_name}</span>
+                            <span style="font-size:0.72rem; color:#888; margin-left:2px;">[{p_id}]</span>
+                            {done_info}
                         </div>
-                        <div style="font-size:0.82rem; opacity:0.7;">{'  |  '.join(summary_parts)}</div>
+                        <div style="display:flex; align-items:center; gap:12px; margin-top:5px; flex-wrap:wrap;">
+                            <span style="font-size:0.78rem; color:#d32f2f; font-weight:600;">\u26a0\ufe0f {reason}</span>
+                        </div>
+                        <div style="display:flex; gap:8px; margin-top:6px; flex-wrap:wrap;">
+                            <span style="background:#e3f2fd; color:#1565c0; padding:2px 8px; border-radius:10px; font-size:0.72rem; font-weight:600;">
+                                \U0001f4e6 일평균 {avg_q}개
+                            </span>
+                            <span style="background:#fff3e0; color:#e65100; padding:2px 8px; border-radius:10px; font-size:0.72rem; font-weight:600;">
+                                \U0001f4ca 최근 총 {total_q}개 ({active_d}/{total_d}일)
+                            </span>
+                        </div>
                     </div>
                     """, unsafe_allow_html=True)
+
+                    # 바로 조치 버튼
+                    btn_cols = st.columns([1, 1, 3])
+                    with btn_cols[0]:
+                        if st.button("\U0001f50d 판매처 상세", key=f"auto_detail_{tid}", use_container_width=True):
+                            st.session_state["page"] = "판매대응 및 재고"
+                            st.session_state["auto_select_product"] = p_id
+                            st.rerun()
+                    with btn_cols[1]:
+                        if st.button("\u2705 완료 처리", key=f"auto_done_{tid}", use_container_width=True):
+                            toggle_task(tid, True)
+                            st.rerun()
+                else:
+                    # ── 일반 태스크: 기존 UI ──
+                    title_display = f'<span class="task-title">{title}</span>'
+                    st.markdown(f"""
+                    <div class="{card_class}">
+                        {badges_html} {title_display} {done_info}
+                    </div>
+                    """, unsafe_allow_html=True)
+
+        # 새 업무 추가 폼
+        st.markdown("---")
+        st.markdown("**\u2795 새 업무 추가**")
+        with st.form("add_task_form", clear_on_submit=True):
+            fc1, fc2, fc3, fc4 = st.columns([4, 2, 2, 2])
+            with fc1:
+                new_title = st.text_input("업무 제목", placeholder="업무 내용을 입력하세요...")
+            with fc2:
+                new_priority = st.selectbox("우선순위", ["normal", "urgent", "routine"], format_func=lambda x: {"urgent": "긴급", "normal": "일반", "routine": "정기"}[x])
+            with fc3:
+                new_type = st.selectbox("유형", ["daily", "weekly", "monthly"], format_func=lambda x: {"daily": "일일", "weekly": "주간", "monthly": "월간"}[x])
+            with fc4:
+                new_writer = st.selectbox("작성자", ["MD", "CS", "CEO", "기타"])
+            add_submitted = st.form_submit_button("\U0001f4be 업무 추가", type="primary", use_container_width=True)
+            if add_submitted and new_title.strip():
+                add_task(new_title.strip(), task_type=new_type, priority=new_priority, due=today_str, writer=new_writer)
+                st.success("업무가 추가되었습니다!")
+                st.rerun()
+            elif add_submitted:
+                st.warning("업무 제목을 입력해주세요.")
+
+    # ════════════════════════════════════════════
+    # Tab 2: 주간/월간 계획
+    # ════════════════════════════════════════════
+    with tab2:
+        sub_tab_w, sub_tab_m = st.tabs(["주간", "월간"])
+
+        # ── 주간 뷰 ──
+        with sub_tab_w:
+            # 이번 주 월~일
+            weekday_idx = now.weekday()  # 0=Mon
+            mon = now - timedelta(days=weekday_idx)
+            week_dates = [(mon + timedelta(days=i)) for i in range(7)]
+            day_names = ["월", "화", "수", "목", "금", "토", "일"]
+
+            cols = st.columns(7)
+            for i, (d, dn) in enumerate(zip(week_dates, day_names)):
+                d_str = d.strftime("%Y-%m-%d")
+                d_tasks = [t for t in all_tasks if t.get("due") == d_str]
+                d_done = sum(1 for t in d_tasks if t.get("done"))
+                is_today = (d_str == today_str)
+                header_style = "color:#1e88e5; font-weight:800;" if is_today else ""
+                with cols[i]:
+                    st.markdown(f"""
+                    <div class="week-col">
+                        <div class="week-col-header" style="{header_style}">
+                            {dn} {d.day}일
+                            <span style="font-size:0.68rem; opacity:0.5;">({d_done}/{len(d_tasks)})</span>
+                        </div>
+                    """, unsafe_allow_html=True)
+                    if d_tasks:
+                        items_html = ""
+                        for t in d_tasks[:6]:
+                            cls = "week-task-item done" if t.get("done") else "week-task-item"
+                            items_html += f'<div class="{cls}">{t["title"][:12]}</div>'
+                        if len(d_tasks) > 6:
+                            items_html += f'<div style="font-size:0.7rem; opacity:0.5; text-align:center;">+{len(d_tasks)-6}건</div>'
+                        st.markdown(items_html, unsafe_allow_html=True)
+                    else:
+                        st.markdown('<div style="font-size:0.72rem; opacity:0.3; text-align:center; padding:8px;">-</div>', unsafe_allow_html=True)
+                    st.markdown("</div>", unsafe_allow_html=True)
+
+            # 주간 업무 추가
+            st.markdown("---")
+            st.markdown("**\u2795 주간 업무 추가**")
+            with st.form("add_weekly_form", clear_on_submit=True):
+                wc1, wc2, wc3, wc4 = st.columns([4, 2, 2, 2])
+                with wc1:
+                    w_title = st.text_input("업무 제목", placeholder="주간 업무 내용...", key="weekly_title")
+                with wc2:
+                    w_due = st.date_input("마감일", value=now, key="weekly_due")
+                with wc3:
+                    w_priority = st.selectbox("우선순위", ["normal", "urgent", "routine"], format_func=lambda x: {"urgent": "긴급", "normal": "일반", "routine": "정기"}[x], key="weekly_pri")
+                with wc4:
+                    w_writer = st.selectbox("작성자", ["MD", "CS", "CEO", "기타"], key="weekly_writer")
+                w_sub = st.form_submit_button("\U0001f4be 주간 업무 추가", use_container_width=True)
+                if w_sub and w_title.strip():
+                    add_task(w_title.strip(), task_type="weekly", priority=w_priority, due=w_due.strftime("%Y-%m-%d"), writer=w_writer)
+                    st.success("주간 업무가 추가되었습니다!")
+                    st.rerun()
+
+        # ── 월간 뷰 ──
+        with sub_tab_m:
+            cal_year = now.year
+            cal_month = now.month
+            st.markdown(f"### {cal_year}년 {cal_month}월")
+
+            day_headers = ["월", "화", "수", "목", "금", "토", "일"]
+            header_html = "".join(f'<div class="cal-header">{d}</div>' for d in day_headers)
+
+            cal_obj = calendar.Calendar(firstweekday=0)
+            month_days = cal_obj.monthdayscalendar(cal_year, cal_month)
+
+            cells_html = ""
+            for week in month_days:
+                for day_num in week:
+                    if day_num == 0:
+                        cells_html += '<div class="cal-cell empty"></div>'
+                    else:
+                        d_str = f"{cal_year}-{cal_month:02d}-{day_num:02d}"
+                        d_tasks = [t for t in all_tasks if t.get("due") == d_str]
+                        count = len(d_tasks)
+                        cls = "cal-cell"
+                        if d_str == today_str:
+                            cls += " today"
+                        if count > 0:
+                            cls += " has-tasks"
+                        dot = f'<br><span class="task-dot"></span> <span style="font-size:0.65rem;">{count}</span>' if count > 0 else ""
+                        cells_html += f'<div class="{cls}">{day_num}{dot}</div>'
+
+            st.markdown(f'<div class="cal-grid">{header_html}{cells_html}</div>', unsafe_allow_html=True)
+
+            # 날짜 선택 → 해당 날짜 업무 표시
+            sel_day = st.number_input("날짜 선택 (일)", min_value=1, max_value=calendar.monthrange(cal_year, cal_month)[1], value=now.day, key="cal_day_sel")
+            sel_date_str = f"{cal_year}-{cal_month:02d}-{int(sel_day):02d}"
+            sel_tasks = [t for t in all_tasks if t.get("due") == sel_date_str]
+            if sel_tasks:
+                st.markdown(f"**{sel_date_str} 업무 ({len(sel_tasks)}건)**")
+                for t in sel_tasks:
+                    pr = t.get("priority", "normal")
+                    pr_label = {"urgent": "긴급", "normal": "일반", "routine": "정기"}.get(pr, "일반")
+                    done_mark = "\u2705" if t.get("done") else "\u2b1c"
+                    st.markdown(f'{done_mark} `{pr_label}` {t["title"]}')
+            else:
+                st.caption(f"{sel_date_str} — 등록된 업무 없음")
+
+            # 월간 업무 추가
+            st.markdown("---")
+            st.markdown("**\u2795 월간 업무 추가**")
+            with st.form("add_monthly_form", clear_on_submit=True):
+                mc1, mc2, mc3, mc4 = st.columns([4, 2, 2, 2])
+                with mc1:
+                    m_title = st.text_input("업무 제목", placeholder="월간 업무 내용...", key="monthly_title")
+                with mc2:
+                    m_due = st.date_input("마감일", value=now, key="monthly_due")
+                with mc3:
+                    m_priority = st.selectbox("우선순위", ["normal", "urgent", "routine"], format_func=lambda x: {"urgent": "긴급", "normal": "일반", "routine": "정기"}[x], key="monthly_pri")
+                with mc4:
+                    m_writer = st.selectbox("작성자", ["MD", "CS", "CEO", "기타"], key="monthly_writer")
+                m_sub = st.form_submit_button("\U0001f4be 월간 업무 추가", use_container_width=True)
+                if m_sub and m_title.strip():
+                    add_task(m_title.strip(), task_type="monthly", priority=m_priority, due=m_due.strftime("%Y-%m-%d"), writer=m_writer)
+                    st.success("월간 업무가 추가되었습니다!")
+                    st.rerun()
+
+    # ════════════════════════════════════════════
+    # Tab 3: 공유 메모
+    # ════════════════════════════════════════════
+    with tab3:
+        color_map = {
+            "yellow": "#fff9c4",
+            "blue": "#bbdefb",
+            "pink": "#f8bbd0",
+            "green": "#c8e6c9",
+        }
+        color_labels = {"yellow": "\U0001f7e1 노랑", "blue": "\U0001f535 파랑", "pink": "\U0001f7e3 분홍", "green": "\U0001f7e2 초록"}
+
+        if all_notes:
+            note_cols = st.columns(3)
+            rotations = ["rot-1", "rot-2", "rot-3"]
+            for ni, note in enumerate(reversed(all_notes)):
+                bg = color_map.get(note.get("color", "yellow"), "#fff9c4")
+                rot = rotations[ni % 3]
+                writer_badge = note.get("writer", "")
+                created = note.get("created", "")
+                text = note.get("text", "").replace("\n", "<br>")
+
+                with note_cols[ni % 3]:
+                    st.markdown(f"""
+                    <div class="sticky-note {rot}" style="background:{bg};">
+                        <div>{text}</div>
+                        <div class="note-meta">
+                            <span><b>{writer_badge}</b> · {created}</span>
+                        </div>
+                    </div>
+                    """, unsafe_allow_html=True)
+                    if st.button("\U0001f5d1 삭제", key=f"del_note_{note['id']}"):
+                        all_notes[:] = [n for n in all_notes if n["id"] != note["id"]]
+                        save_notes()
+                        st.rerun()
         else:
-            st.caption("과거 기록이 없습니다.")
+            st.info("등록된 공유 메모가 없습니다. 아래에서 새 메모를 추가하세요.")
+
+        st.markdown("---")
+        st.markdown("**\U0001f4dd 새 메모 추가**")
+        with st.form("add_sticky_form", clear_on_submit=True):
+            sc1, sc2, sc3 = st.columns([5, 2, 2])
+            with sc1:
+                s_text = st.text_area("메모 내용", height=80, placeholder="공유할 메모를 입력하세요...", key="sticky_text")
+            with sc2:
+                s_color = st.selectbox("색상", list(color_labels.keys()), format_func=lambda x: color_labels[x], key="sticky_color")
+            with sc3:
+                s_writer = st.selectbox("작성자", ["CEO", "MD", "CS", "기타"], key="sticky_writer")
+            s_sub = st.form_submit_button("\U0001f4cc 메모 추가", type="primary", use_container_width=True)
+            if s_sub and s_text.strip():
+                new_note = {
+                    "id": str(uuid.uuid4()),
+                    "text": s_text.strip(),
+                    "color": s_color,
+                    "writer": s_writer,
+                    "created": now.strftime("%Y-%m-%d %H:%M"),
+                }
+                all_notes.append(new_note)
+                save_notes()
+                st.success("메모가 추가되었습니다!")
+                st.rerun()
+            elif s_sub:
+                st.warning("메모 내용을 입력해주세요.")
 
 
 # ─────────────────────────────────────────────
