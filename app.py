@@ -3237,29 +3237,38 @@ elif current_page == "daily_log":
     except Exception:
         _pname_map = {}
 
-    existing_auto_titles = {t["title"] for t in all_tasks if t.get("auto") and t["due"] == today_str}
+    # 기존 자동태스크에서 meta 없는 구형 태스크 제거 (중복 방지)
+    _old_auto = [t for t in all_tasks if t.get("auto") and t["due"] == today_str and not t.get("meta")]
+    for _ot in _old_auto:
+        all_tasks.remove(_ot)
+    if _old_auto:
+        save_tasks()
+
+    # product_id 기반 중복 검사
+    existing_auto_pids = {t.get("meta", {}).get("product_id") for t in all_tasks if t.get("auto") and t["due"] == today_str and t.get("meta")}
     for anom in anomalies:
         pid = anom.get("product_id", "")
+        if pid in existing_auto_pids:
+            continue
         pname = _pname_map.get(pid, pid)
         avg_qty = anom.get("avg_qty", 0)
         active_days = anom.get("active_days", 0)
         total_days = anom.get("total_days", 5)
         total_qty = anom.get("total_qty", 0)
-        auto_title = f"\U0001f6a8 [{pid}] {pname}"
-        if auto_title not in existing_auto_titles:
-            add_task(
-                auto_title, task_type="daily", priority="urgent",
-                due=today_str, auto=True, writer="MD",
-                meta={
-                    "product_id": pid,
-                    "product_name": pname,
-                    "avg_qty": avg_qty,
-                    "active_days": active_days,
-                    "total_days": total_days,
-                    "total_qty": total_qty,
-                    "reason": f"최근 {total_days}일 중 {active_days}일 출고(일평균 {avg_qty}개) → 오늘 미출고",
-                },
-            )
+        auto_title = f"\U0001f6a8 {pname}"
+        add_task(
+            auto_title, task_type="daily", priority="urgent",
+            due=today_str, auto=True, writer="MD",
+            meta={
+                "product_id": pid,
+                "product_name": pname,
+                "avg_qty": avg_qty,
+                "active_days": active_days,
+                "total_days": total_days,
+                "total_qty": total_qty,
+                "reason": f"최근 {total_days}일 중 {active_days}일 출고(일평균 {avg_qty}개) → 오늘 미출고",
+            },
+        )
 
     # ── 어제 미완료 이월 ──
     yesterday_incomplete = [t for t in all_tasks if t.get("due") == yesterday_str and not t.get("done")]
@@ -3311,74 +3320,71 @@ elif current_page == "daily_log":
             if is_done:
                 card_class += " done-task"
 
-            col_chk, col_info = st.columns([0.5, 9.5])
-            with col_chk:
-                new_done = st.checkbox("", value=is_done, key=f"task_chk_{tid}")
-                if new_done != is_done:
-                    toggle_task(tid, new_done)
-                    st.rerun()
-            with col_info:
-                badges_html = f'<span class="priority-badge {priority}">{priority_label}</span>'
-                if is_auto:
-                    badges_html += '<span class="auto-badge">자동생성</span>'
-                if is_carried:
-                    badges_html += '<span class="carry-badge">\u23f0 어제 미완료</span>'
+            # ── 자동생성 판매대응 태스크: 확장 카드 UI ──
+            if is_auto and meta:
+                p_name = meta.get("product_name", "")
+                p_id = meta.get("product_id", "")
+                reason = meta.get("reason", "")
+                avg_q = meta.get("avg_qty", 0)
+                total_q = meta.get("total_qty", 0)
+                active_d = meta.get("active_days", 0)
+                total_d = meta.get("total_days", 5)
 
-                done_info = ""
-                if is_done and done_at:
-                    done_info = f'<span style="font-size:0.72rem; opacity:0.5; margin-left:8px;">\u2705 {done_at} 완료</span>'
+                done_text = f" ✅ {done_at} 완료" if is_done and done_at else ""
+                carried_text = " ⏰이월" if is_carried else ""
 
-                # ── 자동생성 판매대응 태스크: 확장 카드 UI ──
-                if is_auto and meta:
-                    p_name = meta.get("product_name", "")
-                    p_id = meta.get("product_id", "")
-                    reason = meta.get("reason", "")
-                    avg_q = meta.get("avg_qty", 0)
-                    total_q = meta.get("total_qty", 0)
-                    active_d = meta.get("active_days", 0)
-                    total_d = meta.get("total_days", 5)
-
-                    st.markdown(f"""
-                    <div class="{card_class}" style="padding:0.6rem 0.8rem;">
-                        <div style="display:flex; align-items:center; gap:6px; flex-wrap:wrap;">
-                            {badges_html}
-                            <span style="font-weight:700; font-size:0.92rem;">\U0001f6a8 {p_name}</span>
-                            <span style="font-size:0.72rem; color:#888; margin-left:2px;">[{p_id}]</span>
-                            {done_info}
-                        </div>
-                        <div style="display:flex; align-items:center; gap:12px; margin-top:5px; flex-wrap:wrap;">
-                            <span style="font-size:0.78rem; color:#d32f2f; font-weight:600;">\u26a0\ufe0f {reason}</span>
-                        </div>
-                        <div style="display:flex; gap:8px; margin-top:6px; flex-wrap:wrap;">
-                            <span style="background:#e3f2fd; color:#1565c0; padding:2px 8px; border-radius:10px; font-size:0.72rem; font-weight:600;">
-                                \U0001f4e6 일평균 {avg_q}개
-                            </span>
-                            <span style="background:#fff3e0; color:#e65100; padding:2px 8px; border-radius:10px; font-size:0.72rem; font-weight:600;">
-                                \U0001f4ca 최근 총 {total_q}개 ({active_d}/{total_d}일)
-                            </span>
-                        </div>
-                    </div>
-                    """, unsafe_allow_html=True)
+                col_chk, col_info = st.columns([0.3, 9.7])
+                with col_chk:
+                    new_done = st.checkbox("완료", value=is_done, key=f"task_chk_{tid}", label_visibility="collapsed")
+                    if new_done != is_done:
+                        toggle_task(tid, new_done)
+                        st.rerun()
+                with col_info:
+                    _border_color = "#e53935" if priority == "urgent" else "#1e88e5"
+                    _opacity = "0.55" if is_done else "1"
+                    _strike = "text-decoration:line-through;" if is_done else ""
+                    st.markdown(f'<div style="border-left:4px solid {_border_color}; padding:0.5rem 0.7rem; border-radius:8px; background:#fafafa; opacity:{_opacity};">'
+                        f'<span style="background:#e53935; color:#fff; padding:1px 7px; border-radius:8px; font-size:0.7rem; font-weight:700;">{priority_label}</span> '
+                        f'<span style="background:#e3f2fd; color:#1565c0; padding:1px 7px; border-radius:8px; font-size:0.7rem;">자동생성</span>'
+                        f'{carried_text}'
+                        f'<br><span style="font-weight:700; font-size:0.95rem; {_strike}">🚨 {p_name}</span> '
+                        f'<span style="font-size:0.72rem; color:#888;">[{p_id}]</span>'
+                        f'<span style="font-size:0.7rem; opacity:0.5; margin-left:6px;">{done_text}</span>'
+                        f'<br><span style="font-size:0.78rem; color:#d32f2f; font-weight:600;">⚠️ {reason}</span>'
+                        f'<br><span style="background:#e3f2fd; color:#1565c0; padding:1px 7px; border-radius:10px; font-size:0.72rem; font-weight:600;">📦 일평균 {avg_q}개</span> '
+                        f'<span style="background:#fff3e0; color:#e65100; padding:1px 7px; border-radius:10px; font-size:0.72rem; font-weight:600;">📊 최근 총 {total_q}개 ({active_d}/{total_d}일)</span>'
+                        f'</div>', unsafe_allow_html=True)
 
                     # 바로 조치 버튼
                     btn_cols = st.columns([1, 1, 3])
                     with btn_cols[0]:
-                        if st.button("\U0001f50d 판매처 상세", key=f"auto_detail_{tid}", use_container_width=True):
-                            st.session_state["page"] = "판매대응 및 재고"
+                        if st.button("🔍 판매처 상세", key=f"auto_detail_{tid}", use_container_width=True):
+                            st.session_state["page"] = "sales_inventory"
                             st.session_state["auto_select_product"] = p_id
                             st.rerun()
                     with btn_cols[1]:
-                        if st.button("\u2705 완료 처리", key=f"auto_done_{tid}", use_container_width=True):
+                        if st.button("✅ 완료 처리", key=f"auto_done_{tid}", use_container_width=True):
                             toggle_task(tid, True)
                             st.rerun()
-                else:
-                    # ── 일반 태스크: 기존 UI ──
+            else:
+                # ── 일반 태스크: 기존 UI ──
+                col_chk, col_info = st.columns([0.3, 9.7])
+                with col_chk:
+                    new_done = st.checkbox("완료", value=is_done, key=f"task_chk_{tid}", label_visibility="collapsed")
+                    if new_done != is_done:
+                        toggle_task(tid, new_done)
+                        st.rerun()
+                with col_info:
+                    badges_html = f'<span class="priority-badge {priority}">{priority_label}</span>'
+                    if is_auto:
+                        badges_html += '<span class="auto-badge">자동생성</span>'
+                    if is_carried:
+                        badges_html += '<span class="carry-badge">⏰ 어제 미완료</span>'
+                    done_info = ""
+                    if is_done and done_at:
+                        done_info = f'<span style="font-size:0.72rem; opacity:0.5; margin-left:8px;">✅ {done_at} 완료</span>'
                     title_display = f'<span class="task-title">{title}</span>'
-                    st.markdown(f"""
-                    <div class="{card_class}">
-                        {badges_html} {title_display} {done_info}
-                    </div>
-                    """, unsafe_allow_html=True)
+                    st.markdown(f'<div class="{card_class}">{badges_html} {title_display} {done_info}</div>', unsafe_allow_html=True)
 
         # 새 업무 추가 폼
         st.markdown("---")
