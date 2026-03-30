@@ -596,6 +596,64 @@ SEARCH_HISTORY_FILE = os.path.join(DATA_DIR, "search_history.json")
 
 
 # ─────────────────────────────────────────────
+# GitHub Gist 기반 클라우드 데이터 영속성
+# ─────────────────────────────────────────────
+def _get_gist_config():
+    """GitHub Gist 설정을 반환. 설정 없으면 None."""
+    try:
+        token = st.secrets["github"]["gist_token"]
+        gist_id = st.secrets["github"]["gist_id"]
+        return {"token": token, "gist_id": gist_id}
+    except (KeyError, FileNotFoundError):
+        return None
+
+
+def _gist_restore_all():
+    """앱 시작 시 GitHub Gist에서 모든 데이터 파일 복원."""
+    if st.session_state.get("_gist_restored"):
+        return
+    cfg = _get_gist_config()
+    if not cfg:
+        st.session_state["_gist_restored"] = True
+        return
+    try:
+        resp = requests.get(
+            f"https://api.github.com/gists/{cfg['gist_id']}",
+            headers={"Authorization": f"token {cfg['token']}"},
+            timeout=10,
+        )
+        if resp.status_code == 200:
+            files = resp.json().get("files", {})
+            for fname, fdata in files.items():
+                local_path = os.path.join(DATA_DIR, fname)
+                if not os.path.exists(local_path) or os.path.getsize(local_path) == 0:
+                    with open(local_path, "w", encoding="utf-8") as f:
+                        f.write(fdata["content"])
+    except Exception:
+        pass
+    st.session_state["_gist_restored"] = True
+
+
+def _gist_backup(filepath):
+    """파일 변경 시 GitHub Gist에 백업 (비동기)."""
+    cfg = _get_gist_config()
+    if not cfg:
+        return
+    fname = os.path.basename(filepath)
+    try:
+        with open(filepath, "r", encoding="utf-8") as f:
+            content = f.read()
+        requests.patch(
+            f"https://api.github.com/gists/{cfg['gist_id']}",
+            headers={"Authorization": f"token {cfg['token']}"},
+            json={"files": {fname: {"content": content}}},
+            timeout=10,
+        )
+    except Exception:
+        pass
+
+
+# ─────────────────────────────────────────────
 # 유틸 함수
 # ─────────────────────────────────────────────
 def load_json(filepath, default=None):
@@ -610,6 +668,7 @@ def load_json(filepath, default=None):
 def save_json(filepath, data):
     with open(filepath, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
+    _gist_backup(filepath)
 
 
 # 우리 매장명 목록
@@ -1853,6 +1912,95 @@ def show_shop_detail_dialog():
     )
 
 
+@st.dialog("📝 판매처별 상품페이지", width="small")
+def show_product_pages_dialog():
+    """판매처별 상품페이지 URL 목록 팝업"""
+    import re as _re
+    data = st.session_state.get("_product_pages_data", {})
+    if not data:
+        st.warning("데이터를 불러올 수 없습니다.")
+        return
+    p_name = data.get("product_name", "")
+    p_id = data.get("product_id", "")
+    shops = data.get("shops", [])
+    brand = data.get("brand", "")
+
+    st.markdown(f'<div style="font-size:0.9rem;"><b>{brand}</b> | {p_name} <code>[{p_id}]</code></div>', unsafe_allow_html=True)
+    st.caption("각 판매처 상품페이지를 열어 썸네일·제목·상세이미지·가격을 확인하세요.")
+
+    has_urls = False
+    for shop in shops:
+        urls = shop.get("urls", [])
+        if urls:
+            has_urls = True
+            for url in urls:
+                # URL 끝의 숫자를 상품코드로 추출
+                code_match = _re.search(r'(\d{5,})(?:\?|$|/\s*$)', url)
+                shop_code = code_match.group(1) if code_match else ""
+                code_html = f' <span style="font-size:0.75rem; color:#888; background:#f0f0f0; padding:0 3px; border-radius:3px;">{shop_code}</span>' if shop_code else ""
+                st.markdown(
+                    f'<div style="display:flex; align-items:center; gap:6px; padding:3px 8px; border-bottom:1px solid #eee; font-size:0.86rem;">'
+                    f'<span style="flex:1; white-space:nowrap; overflow:hidden;">🛒 <b>{shop["name"]}</b>{code_html}</span>'
+                    f'<span style="font-size:0.78rem; color:#999; white-space:nowrap;">{shop["qty"]}개</span>'
+                    f'<a href="{url}" target="_blank" style="background:#1e88e5; color:#fff; padding:1px 6px; border-radius:3px; font-size:0.75rem; text-decoration:none; white-space:nowrap;">열기↗</a>'
+                    f'</div>', unsafe_allow_html=True)
+    if not has_urls:
+        st.info("등록된 상품페이지 URL이 없습니다.")
+
+
+def quick_shop_detail(pid: str, pname: str, avg_qty=0, today_shipped=None):
+    """업무 일지 등에서 바로 판매처 상세 팝업을 띄우는 헬퍼."""
+    from datetime import timedelta as _td
+    _today = datetime.now()
+    dates = tuple((_today - _td(days=i)).strftime("%Y-%m-%d") for i in range(1, 8))
+    orders_map = fetch_orders_parallel(dates)
+    shop_list = fetch_shop_list()
+    pid_shops: dict = {}
+    for d_str, orders in orders_map.items():
+        for o in orders:
+            shop_code = o.get("shop_id", "")
+            if not shop_code:
+                continue
+            shop_name = shop_list.get(shop_code, shop_code)
+            shop_pid = o.get("shop_product_id", "")
+            order_products = o.get("order_products", [])
+            if isinstance(order_products, list):
+                for op in order_products:
+                    if str(op.get("product_id", "")) != str(pid):
+                        continue
+                    qty = 1
+                    try:
+                        qty = int(float(str(op.get("qty", 1))))
+                    except (ValueError, TypeError):
+                        pass
+                    amount = 0
+                    try:
+                        amount = int(float(str(op.get("prd_amount", 0))))
+                    except (ValueError, TypeError):
+                        pass
+                    if shop_name not in pid_shops:
+                        pid_shops[shop_name] = {"qty": 0, "amount": 0, "order_count": 0, "shop_product_ids": set()}
+                    pid_shops[shop_name]["qty"] += qty
+                    pid_shops[shop_name]["amount"] += amount
+                    pid_shops[shop_name]["order_count"] += 1
+                    if shop_pid:
+                        pid_shops[shop_name]["shop_product_ids"].add(shop_pid)
+    if not pid_shops:
+        return None
+    sorted_shops = sorted(pid_shops.items(), key=lambda x: -x[1]["qty"])
+    shops_data = []
+    for s_name, s_info in sorted_shops:
+        urls = [build_shop_url(s_name, spid) for spid in s_info["shop_product_ids"] if build_shop_url(s_name, spid)]
+        shops_data.append({"name": s_name, "qty": s_info["qty"], "amount": s_info["amount"], "order_count": s_info["order_count"], "urls": urls})
+    brand = extract_brand(pname)
+    shop_summary = " · ".join([f"{sn} {si['qty']}개" for sn, si in sorted_shops[:3]])
+    return {
+        "product_name": pname, "product_id": pid, "shops": shops_data,
+        "brand": brand, "avg_qty": avg_qty, "today_shipped": today_shipped,
+        "shop_summary": shop_summary,
+    }
+
+
 # ─────────────────────────────────────────────
 # 판매처별 매출 조회
 # ─────────────────────────────────────────────
@@ -2322,6 +2470,9 @@ st.markdown(f"""
 
 
 # ═════════════════════════════════════════════
+# 클라우드 환경: Gist에서 데이터 복원 (앱 시작 시 1회)
+_gist_restore_all()
+
 # 페이지 라우팅
 # ═════════════════════════════════════════════
 current_page = st.session_state.get("current_page", "dashboard")
@@ -2831,12 +2982,18 @@ elif current_page == "sales_inventory":
 elif current_page == "price_monitor":
     st.markdown('<div class="section-title"><span class="icon">🛒</span> 실시간 가격 모니터링 (네이버 쇼핑)</div>', unsafe_allow_html=True)
 
+    # 업무일지에서 넘어온 자동 검색 키워드
+    _auto_kw = st.session_state.pop("_auto_price_keyword", "")
+
     # 검색 폼 (메인 영역에 배치)
     search_col1, search_col2 = st.columns([4, 1])
     with search_col1:
-        search_keyword = st.text_input("🔍 검색 키워드", value="", placeholder="검색할 상품 키워드를 입력하세요...", label_visibility="collapsed")
+        search_keyword = st.text_input("🔍 검색 키워드", value=_auto_kw, placeholder="검색할 상품 키워드를 입력하세요...", label_visibility="collapsed")
     with search_col2:
         search_btn = st.button("🔍 검색", type="primary", use_container_width=True)
+    # 자동 검색 트리거
+    if _auto_kw and not search_btn:
+        search_btn = True
 
     # 최근 검색 이력 (클릭 재검색 + 삭제 기능)
     history = load_search_history()
@@ -3170,6 +3327,13 @@ elif current_page == "daily_log":
         white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
     }
     .week-task-item.done { text-decoration: line-through; opacity: 0.5; }
+    /* 업무일지 버튼 축소 */
+    [data-testid="stVerticalBlock"] [data-testid="stButton"] button {
+        font-size: 0.72rem !important;
+        padding: 0.1rem 0.3rem !important;
+        min-height: 1.5rem !important;
+        height: 1.5rem !important;
+    }
     </style>
     """, unsafe_allow_html=True)
 
@@ -3244,7 +3408,22 @@ elif current_page == "daily_log":
     if _old_auto:
         save_tasks()
 
-    # product_id 기반 중복 검사
+    # ── 실시간 동기화: 출고 완료된 자동태스크 자동 완료 처리 ──
+    current_anomaly_pids = {a.get("product_id", "") for a in anomalies}
+    _sync_changed = False
+    for t in all_tasks:
+        if not (t.get("auto") and t["due"] == today_str and t.get("meta")):
+            continue
+        t_pid = t["meta"].get("product_id", "")
+        if t_pid and t_pid not in current_anomaly_pids and not t.get("done"):
+            # 현재 anomalies에 없음 = 출고 완료됨 → 자동 완료
+            t["done"] = True
+            t["done_at"] = datetime.now().strftime("%Y-%m-%d %H:%M")
+            _sync_changed = True
+    if _sync_changed:
+        save_tasks()
+
+    # product_id 기반 중복 검사 + 신규 추가
     existing_auto_pids = {t.get("meta", {}).get("product_id") for t in all_tasks if t.get("auto") and t["due"] == today_str and t.get("meta")}
     for anom in anomalies:
         pid = anom.get("product_id", "")
@@ -3286,6 +3465,27 @@ elif current_page == "daily_log":
     total_count = len(today_tasks)
     pct = round((done_count / total_count * 100), 1) if total_count > 0 else 0
 
+    # ── 팝업 트리거 (tabs 밖에서 실행해야 @st.dialog 정상 작동) ──
+    _pending = st.session_state.pop("_pending_shop_detail", None)
+    if _pending:
+        with st.spinner(f"📡 {_pending['pname']} 판매처 조회 중..."):
+            _shop_data = quick_shop_detail(_pending["pid"], _pending["pname"], _pending.get("avg_qty", 0))
+        if _shop_data:
+            st.session_state["_shop_detail_data"] = _shop_data
+            show_shop_detail_dialog()
+        else:
+            st.toast(f"{_pending['pname']}: 최근 7일 주문 데이터 없음")
+
+    _pending_pages = st.session_state.pop("_pending_product_pages", None)
+    if _pending_pages:
+        with st.spinner(f"📡 {_pending_pages['pname']} 상품페이지 조회 중..."):
+            _pages_data = quick_shop_detail(_pending_pages["pid"], _pending_pages["pname"], _pending_pages.get("avg_qty", 0))
+        if _pages_data:
+            st.session_state["_product_pages_data"] = _pages_data
+            show_product_pages_dialog()
+        else:
+            st.toast(f"{_pending_pages['pname']}: 최근 7일 주문 데이터 없음")
+
     # ── 3 Tabs ──
     tab1, tab2, tab3 = st.tabs(["\U0001f4c5 오늘 업무", "\U0001f4c6 주간/월간 계획", "\U0001f4cc 공유 메모"])
 
@@ -3305,7 +3505,65 @@ elif current_page == "daily_log":
         if not today_tasks:
             st.info("오늘 등록된 업무가 없습니다. 아래에서 새 업무를 추가하세요.")
 
-        for idx, task in enumerate(today_tasks):
+        # 자동생성 태스크와 일반 태스크 분리
+        auto_tasks = [t for t in today_tasks if t.get("auto") and t.get("meta")]
+        manual_tasks = [t for t in today_tasks if not (t.get("auto") and t.get("meta"))]
+
+        # ── 자동생성 판매대응 태스크: 2열 컴팩트 그리드 ──
+        if auto_tasks:
+            st.markdown(f"**🚨 판매 대응 필요** ({len(auto_tasks)}건)")
+            grid_cols = st.columns(2)
+            for idx, task in enumerate(auto_tasks):
+                tid = task["id"]
+                is_done = task.get("done", False)
+                meta = task.get("meta", {})
+                is_carried = tid in carried_ids
+                p_name = meta.get("product_name", "")
+                p_id = meta.get("product_id", "")
+                avg_q = meta.get("avg_qty", 0)
+                total_q = meta.get("total_qty", 0)
+                active_d = meta.get("active_days", 0)
+                total_d = meta.get("total_days", 5)
+
+                _opacity = "0.5" if is_done else "1"
+                _strike = "text-decoration:line-through;" if is_done else ""
+                done_mark = " ✅" if is_done else ""
+                carry_mark = " ⏰" if is_carried else ""
+
+                with grid_cols[idx % 2]:
+                    st.markdown(
+                        f'<div style="border-left:3px solid #e53935; padding:0.4rem 0.6rem; border-radius:6px; background:#fafafa; margin-bottom:0.2rem; opacity:{_opacity};">'
+                        f'<span style="font-weight:700; font-size:0.85rem; {_strike}">🚨 {p_name}</span>'
+                        f'<span style="font-size:0.65rem; color:#999;"> [{p_id}]</span>{done_mark}{carry_mark}'
+                        f'<br><span style="font-size:0.72rem; color:#d32f2f;">⚠️ {active_d}/{total_d}일 출고 → 미출고</span>'
+                        f' <span style="background:#e3f2fd; color:#1565c0; padding:0 5px; border-radius:8px; font-size:0.65rem;">일평균 {avg_q}개</span>'
+                        f' <span style="background:#fff3e0; color:#e65100; padding:0 5px; border-radius:8px; font-size:0.65rem;">총 {total_q}개</span>'
+                        f'</div>', unsafe_allow_html=True)
+                    bc1, bc2, bc3, bc4 = st.columns(4)
+                    with bc1:
+                        if st.button("🔍상세", key=f"auto_detail_{tid}"):
+                            st.session_state["_pending_shop_detail"] = {"pid": p_id, "pname": p_name, "avg_qty": avg_q}
+                            st.rerun()
+                    with bc2:
+                        if st.button("💰가격", key=f"auto_price_{tid}"):
+                            st.session_state.current_page = "price_monitor"
+                            st.session_state["_auto_price_keyword"] = p_name
+                            st.rerun()
+                    with bc3:
+                        if st.button("📝페이지", key=f"auto_page_{tid}"):
+                            st.session_state["_pending_product_pages"] = {"pid": p_id, "pname": p_name, "avg_qty": avg_q}
+                            st.rerun()
+                    with bc4:
+                        if st.button("✅완료", key=f"auto_done_{tid}"):
+                            toggle_task(tid, True)
+                            st.rerun()
+
+            st.markdown("---")
+
+        # ── 일반 태스크 ──
+        if manual_tasks:
+            st.markdown(f"**📋 수동 업무** ({len(manual_tasks)}건)")
+        for task in manual_tasks:
             tid = task["id"]
             is_done = task.get("done", False)
             priority = task.get("priority", "normal")
@@ -3313,78 +3571,29 @@ elif current_page == "daily_log":
             done_at = task.get("done_at")
             is_auto = task.get("auto", False)
             is_carried = tid in carried_ids
-            meta = task.get("meta", {})
 
             priority_label = {"urgent": "긴급", "normal": "일반", "routine": "정기"}.get(priority, "일반")
             card_class = f"task-card priority-{priority}"
             if is_done:
                 card_class += " done-task"
 
-            # ── 자동생성 판매대응 태스크: 확장 카드 UI ──
-            if is_auto and meta:
-                p_name = meta.get("product_name", "")
-                p_id = meta.get("product_id", "")
-                reason = meta.get("reason", "")
-                avg_q = meta.get("avg_qty", 0)
-                total_q = meta.get("total_qty", 0)
-                active_d = meta.get("active_days", 0)
-                total_d = meta.get("total_days", 5)
-
-                done_text = f" ✅ {done_at} 완료" if is_done and done_at else ""
-                carried_text = " ⏰이월" if is_carried else ""
-
-                col_chk, col_info = st.columns([0.3, 9.7])
-                with col_chk:
-                    new_done = st.checkbox("완료", value=is_done, key=f"task_chk_{tid}", label_visibility="collapsed")
-                    if new_done != is_done:
-                        toggle_task(tid, new_done)
-                        st.rerun()
-                with col_info:
-                    _border_color = "#e53935" if priority == "urgent" else "#1e88e5"
-                    _opacity = "0.55" if is_done else "1"
-                    _strike = "text-decoration:line-through;" if is_done else ""
-                    st.markdown(f'<div style="border-left:4px solid {_border_color}; padding:0.5rem 0.7rem; border-radius:8px; background:#fafafa; opacity:{_opacity};">'
-                        f'<span style="background:#e53935; color:#fff; padding:1px 7px; border-radius:8px; font-size:0.7rem; font-weight:700;">{priority_label}</span> '
-                        f'<span style="background:#e3f2fd; color:#1565c0; padding:1px 7px; border-radius:8px; font-size:0.7rem;">자동생성</span>'
-                        f'{carried_text}'
-                        f'<br><span style="font-weight:700; font-size:0.95rem; {_strike}">🚨 {p_name}</span> '
-                        f'<span style="font-size:0.72rem; color:#888;">[{p_id}]</span>'
-                        f'<span style="font-size:0.7rem; opacity:0.5; margin-left:6px;">{done_text}</span>'
-                        f'<br><span style="font-size:0.78rem; color:#d32f2f; font-weight:600;">⚠️ {reason}</span>'
-                        f'<br><span style="background:#e3f2fd; color:#1565c0; padding:1px 7px; border-radius:10px; font-size:0.72rem; font-weight:600;">📦 일평균 {avg_q}개</span> '
-                        f'<span style="background:#fff3e0; color:#e65100; padding:1px 7px; border-radius:10px; font-size:0.72rem; font-weight:600;">📊 최근 총 {total_q}개 ({active_d}/{total_d}일)</span>'
-                        f'</div>', unsafe_allow_html=True)
-
-                    # 바로 조치 버튼
-                    btn_cols = st.columns([1, 1, 3])
-                    with btn_cols[0]:
-                        if st.button("🔍 판매처 상세", key=f"auto_detail_{tid}", use_container_width=True):
-                            st.session_state["page"] = "sales_inventory"
-                            st.session_state["auto_select_product"] = p_id
-                            st.rerun()
-                    with btn_cols[1]:
-                        if st.button("✅ 완료 처리", key=f"auto_done_{tid}", use_container_width=True):
-                            toggle_task(tid, True)
-                            st.rerun()
-            else:
-                # ── 일반 태스크: 기존 UI ──
-                col_chk, col_info = st.columns([0.3, 9.7])
-                with col_chk:
-                    new_done = st.checkbox("완료", value=is_done, key=f"task_chk_{tid}", label_visibility="collapsed")
-                    if new_done != is_done:
-                        toggle_task(tid, new_done)
-                        st.rerun()
-                with col_info:
-                    badges_html = f'<span class="priority-badge {priority}">{priority_label}</span>'
-                    if is_auto:
-                        badges_html += '<span class="auto-badge">자동생성</span>'
-                    if is_carried:
-                        badges_html += '<span class="carry-badge">⏰ 어제 미완료</span>'
-                    done_info = ""
-                    if is_done and done_at:
-                        done_info = f'<span style="font-size:0.72rem; opacity:0.5; margin-left:8px;">✅ {done_at} 완료</span>'
-                    title_display = f'<span class="task-title">{title}</span>'
-                    st.markdown(f'<div class="{card_class}">{badges_html} {title_display} {done_info}</div>', unsafe_allow_html=True)
+            col_chk, col_info = st.columns([0.3, 9.7])
+            with col_chk:
+                new_done = st.checkbox("완료", value=is_done, key=f"task_chk_{tid}", label_visibility="collapsed")
+                if new_done != is_done:
+                    toggle_task(tid, new_done)
+                    st.rerun()
+            with col_info:
+                badges_html = f'<span class="priority-badge {priority}">{priority_label}</span>'
+                if is_auto:
+                    badges_html += '<span class="auto-badge">자동생성</span>'
+                if is_carried:
+                    badges_html += '<span class="carry-badge">⏰ 어제 미완료</span>'
+                done_info = ""
+                if is_done and done_at:
+                    done_info = f'<span style="font-size:0.72rem; opacity:0.5; margin-left:8px;">✅ {done_at} 완료</span>'
+                title_display = f'<span class="task-title">{title}</span>'
+                st.markdown(f'<div class="{card_class}">{badges_html} {title_display} {done_info}</div>', unsafe_allow_html=True)
 
         # 새 업무 추가 폼
         st.markdown("---")
