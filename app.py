@@ -2710,8 +2710,6 @@ if current_page == "dashboard":
                     st.caption(f"...외 {len(watchlist) - 3}개 상품")
             if not anomalies and not watchlist:
                 st.success("✅ 판매 대응 필요 상품 없음 — 매일 출고 상품이 오늘도 정상 출고 중입니다.")
-        else:
-            st.success("✅ 판매 대응 필요 상품 없음 — 매일 출고 상품이 오늘도 정상 출고 중입니다.")
     elif insight_data["status"] != "미연동":
         st.info(f"📊 판매 인사이트: {insight_data['status']}")
 
