@@ -3333,54 +3333,130 @@ elif current_page == "price_monitor":
 elif current_page == "daily_log":
     st.markdown('<div class="section-title"><span class="icon">📝</span> 업무 일지 (Daily Log)</div>', unsafe_allow_html=True)
 
-    # ── 커스텀 CSS ──
+    # ── 커스텀 CSS (리디자인) ──
     st.markdown("""
     <style>
-    .task-card {
-        background: var(--background-color, #fff);
-        border-radius: 10px;
-        padding: 0.7rem 1rem;
-        margin-bottom: 0.5rem;
-        border-left: 4px solid #90a4ae;
-        box-shadow: 0 1px 4px rgba(0,0,0,0.06);
-        transition: all 0.2s;
+    /* ── KPI 요약 카드 ── */
+    .log-kpi-row { display: flex; gap: 0.6rem; margin-bottom: 1rem; }
+    .log-kpi {
+        flex: 1; border-radius: 12px; padding: 0.7rem 0.8rem; text-align: center;
+        box-shadow: 0 1px 6px rgba(0,0,0,0.07); position: relative; overflow: hidden;
     }
-    .task-card:hover { box-shadow: 0 2px 8px rgba(0,0,0,0.12); }
-    .task-card.priority-urgent { border-left-color: #e53935; }
-    .task-card.priority-normal { border-left-color: #1e88e5; }
-    .task-card.priority-routine { border-left-color: #90a4ae; }
-    .task-card.done-task { opacity: 0.55; }
-    .task-card.done-task .task-title { text-decoration: line-through; }
-    .priority-badge {
-        display: inline-block; padding: 1px 8px; border-radius: 8px;
-        font-size: 0.7rem; font-weight: 600; color: #fff; margin-right: 6px;
-    }
-    .priority-badge.urgent { background: #e53935; }
-    .priority-badge.normal { background: #1e88e5; }
-    .priority-badge.routine { background: #90a4ae; }
-    .carry-badge {
-        display: inline-block; padding: 1px 8px; border-radius: 8px;
-        font-size: 0.68rem; font-weight: 500; color: #ff6f00;
-        background: #fff3e0; margin-left: 6px;
-    }
-    .auto-badge {
-        display: inline-block; padding: 1px 8px; border-radius: 8px;
-        font-size: 0.68rem; font-weight: 500; color: #c62828;
-        background: #ffebee; margin-left: 6px;
-    }
+    .log-kpi .kpi-icon { font-size: 1.3rem; }
+    .log-kpi .kpi-label { font-size: 0.72rem; color: #666; margin-top: 2px; }
+    .log-kpi .kpi-value { font-size: 1.4rem; font-weight: 800; margin: 2px 0; }
+    .log-kpi .kpi-sub { font-size: 0.68rem; color: #999; }
+    .log-kpi.urgent { background: linear-gradient(135deg, #fff5f5, #ffe0e0); border: 1px solid #ffcdd2; }
+    .log-kpi.urgent .kpi-value { color: #d32f2f; }
+    .log-kpi.watch { background: linear-gradient(135deg, #fffbf0, #fff3e0); border: 1px solid #ffe0b2; }
+    .log-kpi.watch .kpi-value { color: #e65100; }
+    .log-kpi.done { background: linear-gradient(135deg, #f1faf1, #e8f5e9); border: 1px solid #c8e6c9; }
+    .log-kpi.done .kpi-value { color: #2e7d32; }
+    .log-kpi.rate { background: linear-gradient(135deg, #f3f0ff, #ede7f6); border: 1px solid #d1c4e9; }
+    .log-kpi.rate .kpi-value { color: #5e35b1; }
+
+    /* ── 프로그레스 바 ── */
     .progress-container {
-        background: #e0e0e0; border-radius: 10px; height: 22px;
-        overflow: hidden; margin: 0.5rem 0 1rem 0; position: relative;
+        background: #e8e8e8; border-radius: 10px; height: 8px;
+        overflow: hidden; margin: 0 0 1.2rem 0; position: relative;
     }
     .progress-fill {
         height: 100%; border-radius: 10px;
         background: linear-gradient(90deg, #43a047, #66bb6a);
         transition: width 0.5s ease;
     }
-    .progress-text {
-        position: absolute; top: 50%; left: 50%; transform: translate(-50%,-50%);
-        font-size: 0.75rem; font-weight: 600; color: #333;
+
+    /* ── 송장 미출력 오버레이 ── */
+    .shipment-pending {
+        background: #f8f9fa; border: 2px dashed #ccc; border-radius: 12px;
+        padding: 2rem 1rem; text-align: center; color: #888; margin: 1rem 0;
     }
+    .shipment-pending .sp-icon { font-size: 2.5rem; margin-bottom: 0.5rem; }
+    .shipment-pending .sp-title { font-size: 1rem; font-weight: 700; color: #555; }
+    .shipment-pending .sp-desc { font-size: 0.82rem; color: #999; margin-top: 0.3rem; }
+
+    /* ── 섹션 헤더 ── */
+    .log-section {
+        display: flex; align-items: center; gap: 0.5rem;
+        padding: 0.4rem 0; margin: 0.6rem 0 0.3rem 0;
+        font-weight: 700; font-size: 0.9rem; color: #333;
+        border-bottom: 2px solid #eee;
+    }
+    .log-section .sec-count {
+        background: #e3f2fd; color: #1565c0; padding: 1px 8px;
+        border-radius: 10px; font-size: 0.72rem; font-weight: 600;
+    }
+    .log-section.urgent-sec { border-bottom-color: #ef9a9a; }
+    .log-section.urgent-sec .sec-count { background: #ffebee; color: #c62828; }
+    .log-section.watch-sec { border-bottom-color: #ffe0b2; }
+    .log-section.watch-sec .sec-count { background: #fff3e0; color: #e65100; }
+    .log-section.done-sec { border-bottom-color: #c8e6c9; }
+    .log-section.done-sec .sec-count { background: #e8f5e9; color: #2e7d32; }
+
+    /* ── 컴팩트 태스크 카드 ── */
+    .task-row {
+        display: flex; align-items: center; gap: 0.5rem;
+        padding: 0.55rem 0.8rem; margin-bottom: 0.35rem;
+        border-radius: 10px; background: #fff;
+        border: 1px solid #f0f0f0; transition: all 0.15s;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.04);
+    }
+    .task-row:hover { box-shadow: 0 2px 8px rgba(0,0,0,0.08); border-color: #ddd; }
+    .task-row.urgent-row { border-left: 4px solid #e53935; }
+    .task-row.watch-row { border-left: 4px solid #f59e0b; }
+    .task-row.manual-row { border-left: 4px solid #1e88e5; }
+    .task-row.done-row { opacity: 0.5; background: #fafafa; }
+    .task-row .tr-icon { font-size: 1rem; flex-shrink: 0; }
+    .task-row .tr-body { flex: 1; min-width: 0; }
+    .task-row .tr-name {
+        font-weight: 700; font-size: 0.85rem; color: #333;
+        white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+    .task-row.done-row .tr-name { text-decoration: line-through; color: #999; }
+    .task-row .tr-detail {
+        font-size: 0.72rem; color: #888; margin-top: 1px;
+        white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+    .task-row .tr-badge {
+        display: inline-block; padding: 1px 6px; border-radius: 8px;
+        font-size: 0.62rem; font-weight: 600; margin-left: 4px;
+    }
+    .tr-badge.bg-red { background: #ffebee; color: #c62828; }
+    .tr-badge.bg-orange { background: #fff3e0; color: #e65100; }
+    .tr-badge.bg-green { background: #e8f5e9; color: #2e7d32; }
+    .tr-badge.bg-blue { background: #e3f2fd; color: #1565c0; }
+    .tr-badge.bg-gray { background: #f5f5f5; color: #666; }
+
+    /* ── 대응 로그 테이블 ── */
+    .action-log-row {
+        display: flex; align-items: center; gap: 0.5rem;
+        padding: 0.35rem 0.6rem; font-size: 0.78rem;
+        border-bottom: 1px solid #f5f5f5;
+    }
+    .action-log-row:last-child { border-bottom: none; }
+    .al-time { color: #999; font-size: 0.72rem; width: 45px; flex-shrink: 0; }
+    .al-type { font-weight: 600; width: 110px; flex-shrink: 0; }
+    .al-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .al-memo { color: #666; font-size: 0.72rem; max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+    /* ── 수동 태스크 카드 ── */
+    .manual-task {
+        display: flex; align-items: center; gap: 0.6rem;
+        padding: 0.5rem 0.8rem; margin-bottom: 0.3rem;
+        border-radius: 8px; background: #fff; border: 1px solid #eee;
+    }
+    .manual-task.mt-done { opacity: 0.5; }
+    .manual-task .mt-title { flex: 1; font-size: 0.85rem; font-weight: 600; }
+    .manual-task.mt-done .mt-title { text-decoration: line-through; color: #999; }
+    .mt-pri {
+        display: inline-block; padding: 1px 8px; border-radius: 8px;
+        font-size: 0.68rem; font-weight: 600; color: #fff;
+    }
+    .mt-pri.pri-urgent { background: #e53935; }
+    .mt-pri.pri-normal { background: #1e88e5; }
+    .mt-pri.pri-routine { background: #90a4ae; }
+
+    /* ── 달력 / 주간 뷰 ── */
     .cal-grid {
         display: grid; grid-template-columns: repeat(7, 1fr); gap: 2px;
         margin: 0.5rem 0;
@@ -3402,19 +3478,6 @@ elif current_page == "daily_log":
         background: #1e88e5; border-radius: 50%; margin-top: 2px;
     }
     .cal-cell.empty { border: none; cursor: default; }
-    .sticky-note {
-        border-radius: 8px; padding: 1rem; min-height: 100px;
-        box-shadow: 2px 3px 10px rgba(0,0,0,0.1);
-        position: relative; margin-bottom: 0.8rem;
-        font-size: 0.88rem; line-height: 1.5;
-    }
-    .sticky-note.rot-1 { transform: rotate(-1.5deg); }
-    .sticky-note.rot-2 { transform: rotate(1deg); }
-    .sticky-note.rot-3 { transform: rotate(-0.5deg); }
-    .sticky-note .note-meta {
-        margin-top: 0.7rem; font-size: 0.72rem; opacity: 0.6;
-        display: flex; justify-content: space-between; align-items: center;
-    }
     .week-col {
         background: var(--background-color, #fafafa);
         border-radius: 8px; padding: 0.5rem;
@@ -3430,12 +3493,28 @@ elif current_page == "daily_log":
         white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
     }
     .week-task-item.done { text-decoration: line-through; opacity: 0.5; }
-    /* 업무일지 버튼 축소 */
+
+    /* ── 메모 ── */
+    .sticky-note {
+        border-radius: 8px; padding: 1rem; min-height: 100px;
+        box-shadow: 2px 3px 10px rgba(0,0,0,0.1);
+        position: relative; margin-bottom: 0.8rem;
+        font-size: 0.88rem; line-height: 1.5;
+    }
+    .sticky-note.rot-1 { transform: rotate(-1.5deg); }
+    .sticky-note.rot-2 { transform: rotate(1deg); }
+    .sticky-note.rot-3 { transform: rotate(-0.5deg); }
+    .sticky-note .note-meta {
+        margin-top: 0.7rem; font-size: 0.72rem; opacity: 0.6;
+        display: flex; justify-content: space-between; align-items: center;
+    }
+
+    /* ── 업무일지 내 버튼 축소 ── */
     [data-testid="stVerticalBlock"] [data-testid="stButton"] button {
-        font-size: 0.72rem !important;
-        padding: 0.1rem 0.3rem !important;
-        min-height: 1.5rem !important;
-        height: 1.5rem !important;
+        font-size: 0.75rem !important;
+        padding: 0.15rem 0.5rem !important;
+        min-height: 1.6rem !important;
+        height: 1.6rem !important;
     }
     </style>
     """, unsafe_allow_html=True)
@@ -3637,154 +3716,228 @@ elif current_page == "daily_log":
     # Tab 1: 오늘 업무
     # ════════════════════════════════════════════
     with tab1:
-        st.markdown(f"**완료 {done_count}/{total_count}** — {pct}%")
-        pct_bar = min(pct, 100)
-        st.markdown(f"""
-        <div class="progress-container">
-            <div class="progress-fill" style="width:{pct_bar}%;"></div>
-            <div class="progress-text">{done_count}/{total_count} ({pct}%)</div>
-        </div>
-        """, unsafe_allow_html=True)
-
-        if not today_tasks:
-            st.info("오늘 등록된 업무가 없습니다. 아래에서 새 업무를 추가하세요.")
-
         # 자동생성 태스크와 일반 태스크 분리
         auto_tasks = [t for t in today_tasks if t.get("auto") and t.get("meta")]
         urgent_tasks = [t for t in auto_tasks if t.get("meta", {}).get("level") == "urgent" or t.get("priority") == "urgent"]
         watch_tasks = [t for t in auto_tasks if t.get("meta", {}).get("level") == "watch"]
         manual_tasks = [t for t in today_tasks if not (t.get("auto") and t.get("meta"))]
 
-        # 송장 미출력 안내
-        if not _today_shipped_log and not auto_tasks:
-            st.info("📋 오늘 송장이 아직 출력되지 않았습니다. 송장 출력 후 판매 대응 업무가 자동 생성됩니다.")
-
-        def _render_auto_task_grid(task_list, section_label, border_color, icon):
-            """자동태스크 2열 그리드 렌더링."""
-            if not task_list:
-                return
-            st.markdown(f"**{icon} {section_label}** ({len(task_list)}건)")
-            grid_cols = st.columns(2)
-            for idx, task in enumerate(task_list):
-                tid = task["id"]
-                is_done = task.get("done", False)
-                meta = task.get("meta", {})
-                is_carried = tid in carried_ids
-                p_name = meta.get("product_name", "")
-                p_id = meta.get("product_id", "")
-                avg_q = meta.get("avg_qty", 0)
-                total_q = meta.get("total_qty", 0)
-                active_d = meta.get("active_days", 0)
-                total_d = meta.get("total_days", 5)
-                action = task.get("action")
-
-                _opacity = "0.5" if is_done else "1"
-                _strike = "text-decoration:line-through;" if is_done else ""
-                done_mark = ""
-                if is_done and action:
-                    done_mark = f' <span style="background:#e8f5e9; color:#2e7d32; padding:0 5px; border-radius:8px; font-size:0.63rem;">{action.get("label","✅")}</span>'
-                elif is_done:
-                    done_mark = " ✅"
-                carry_mark = " ⏰" if is_carried else ""
-
-                with grid_cols[idx % 2]:
-                    _action_memo = ""
-                    if action and action.get("memo"):
-                        _action_memo = f'<br><span style="font-size:0.68rem; color:#558b2f;">💬 {action["memo"]}</span>'
-                    st.markdown(
-                        f'<div style="border-left:3px solid {border_color}; padding:0.4rem 0.6rem; border-radius:6px; background:#fafafa; margin-bottom:0.2rem; opacity:{_opacity};">'
-                        f'<span style="font-weight:700; font-size:0.85rem; {_strike}">{icon} {p_name}</span>'
-                        f'<span style="font-size:0.65rem; color:#999;"> [{p_id}]</span>{done_mark}{carry_mark}'
-                        f'<br><span style="font-size:0.72rem; color:{border_color};">⚠️ {active_d}/{total_d}일 출고 → 미출고</span>'
-                        f' <span style="background:#e3f2fd; color:#1565c0; padding:0 5px; border-radius:8px; font-size:0.65rem;">일평균 {avg_q}개</span>'
-                        f' <span style="background:#fff3e0; color:#e65100; padding:0 5px; border-radius:8px; font-size:0.65rem;">총 {total_q}개</span>'
-                        f'{_action_memo}'
-                        f'</div>', unsafe_allow_html=True)
-                    bc1, bc2, bc3, bc4 = st.columns(4)
-                    with bc1:
-                        if st.button("🔍상세", key=f"auto_detail_{tid}"):
-                            st.session_state["_pending_shop_detail"] = {"pid": p_id, "pname": p_name, "avg_qty": avg_q}
-                            st.rerun()
-                    with bc2:
-                        if st.button("💰가격", key=f"auto_price_{tid}"):
-                            st.session_state.current_page = "price_monitor"
-                            st.session_state["_auto_price_keyword"] = p_name
-                            st.rerun()
-                    with bc3:
-                        if st.button("📝페이지", key=f"auto_page_{tid}"):
-                            st.session_state["_pending_product_pages"] = {"pid": p_id, "pname": p_name, "avg_qty": avg_q}
-                            st.rerun()
-                    with bc4:
-                        if is_done:
-                            st.button("✅완료", key=f"auto_done_{tid}", disabled=True)
-                        else:
-                            if st.button("✅완료", key=f"auto_done_{tid}"):
-                                st.session_state["_pending_action_dialog"] = {"task_id": tid, "product_name": p_name}
-                                st.rerun()
-
-        # 🔴 긴급 대응 섹션
-        _render_auto_task_grid(urgent_tasks, "긴급 대응", "#e53935", "🔴")
-
-        # 🟡 추가 확인 섹션
-        if urgent_tasks and watch_tasks:
-            st.markdown("---")
-        _render_auto_task_grid(watch_tasks, "추가 확인", "#f59e0b", "🟡")
-
-        if auto_tasks:
-            st.markdown("---")
-
-        # ── CEO 대응 로그 ──
+        # 미완료/완료 분리
+        urgent_pending = [t for t in urgent_tasks if not t.get("done")]
+        urgent_done = [t for t in urgent_tasks if t.get("done")]
+        watch_pending = [t for t in watch_tasks if not t.get("done")]
+        watch_done = [t for t in watch_tasks if t.get("done")]
+        manual_pending = [t for t in manual_tasks if not t.get("done")]
+        manual_done = [t for t in manual_tasks if t.get("done")]
+        all_done = urgent_done + watch_done + manual_done
         _action_tasks = [t for t in today_tasks if t.get("action")]
+
+        # ── ① 상단 KPI 요약 카드 4개 ──
+        _urgent_pending_n = len(urgent_pending)
+        _watch_pending_n = len(watch_pending)
+        _done_n = len(all_done)
+        _rate_pct = round((done_count / total_count * 100)) if total_count > 0 else 0
+        _urgent_sub = f"미대응 {_urgent_pending_n}" if _urgent_pending_n else "모두 완료 ✓"
+        _watch_sub = f"미대응 {_watch_pending_n}" if _watch_pending_n else "모두 완료 ✓"
+        _done_types = {}
+        for _dt in all_done:
+            _a = _dt.get("action", {})
+            _lbl = _a.get("label", "✅ 완료") if _a else "✅ 완료"
+            _done_types[_lbl] = _done_types.get(_lbl, 0) + 1
+        _done_sub = " / ".join(f"{v}건" for v in _done_types.values()) if _done_types else "-"
+
+        st.markdown(f"""
+        <div class="log-kpi-row">
+            <div class="log-kpi urgent">
+                <div class="kpi-icon">🔴</div>
+                <div class="kpi-label">긴급 대응</div>
+                <div class="kpi-value">{len(urgent_tasks)}건</div>
+                <div class="kpi-sub">{_urgent_sub}</div>
+            </div>
+            <div class="log-kpi watch">
+                <div class="kpi-icon">🟡</div>
+                <div class="kpi-label">추가 확인</div>
+                <div class="kpi-value">{len(watch_tasks)}건</div>
+                <div class="kpi-sub">{_watch_sub}</div>
+            </div>
+            <div class="log-kpi done">
+                <div class="kpi-icon">✅</div>
+                <div class="kpi-label">완료</div>
+                <div class="kpi-value">{_done_n}건</div>
+                <div class="kpi-sub">{_done_sub}</div>
+            </div>
+            <div class="log-kpi rate">
+                <div class="kpi-icon">📊</div>
+                <div class="kpi-label">대응률</div>
+                <div class="kpi-value">{_rate_pct}%</div>
+                <div class="kpi-sub">{done_count}/{total_count}</div>
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
+
+        # ── 프로그레스바 (슬림) ──
+        pct_bar = min(pct, 100)
+        st.markdown(f"""
+        <div class="progress-container">
+            <div class="progress-fill" style="width:{pct_bar}%;"></div>
+        </div>
+        """, unsafe_allow_html=True)
+
+        # ── ② CEO 대응 로그 (상단 노출) ──
         if _action_tasks:
-            with st.expander(f"📊 오늘 대응 로그 ({len(_action_tasks)}건)", expanded=False):
-                _log_rows = []
+            with st.expander(f"📊 오늘 대응 로그 ({len(_action_tasks)}건)", expanded=True):
+                _log_html = ""
                 for t in sorted(_action_tasks, key=lambda x: x.get("done_at", ""), reverse=True):
                     _a = t.get("action", {})
-                    _log_rows.append({
-                        "시간": _a.get("time", t.get("done_at", "")[-5:]),
-                        "상품명": t.get("meta", {}).get("product_name", t.get("title", "")),
-                        "대응유형": _a.get("label", ""),
-                        "메모": _a.get("memo", ""),
-                        "담당": _a.get("worker", ""),
-                    })
-                st.dataframe(pd.DataFrame(_log_rows), use_container_width=True, hide_index=True)
+                    _time = _a.get("time", t.get("done_at", "")[-5:])
+                    _type_lbl = _a.get("label", "✅")
+                    _pname = t.get("meta", {}).get("product_name", t.get("title", ""))
+                    _memo = _a.get("memo", "")
+                    _memo_html = f'<span class="al-memo">💬 {_memo}</span>' if _memo else ""
+                    _log_html += f"""
+                    <div class="action-log-row">
+                        <span class="al-time">{_time}</span>
+                        <span class="al-type">{_type_lbl}</span>
+                        <span class="al-name">{_pname}</span>
+                        {_memo_html}
+                    </div>"""
+                st.markdown(f'<div style="background:#fafafa; border-radius:8px; padding:0.3rem 0;">{_log_html}</div>', unsafe_allow_html=True)
 
-        # ── 일반 태스크 ──
+        # ── ③ 송장 미출력 시 dim 처리 ──
+        if not _today_shipped_log and not auto_tasks:
+            st.markdown("""
+            <div class="shipment-pending">
+                <div class="sp-icon">📦</div>
+                <div class="sp-title">오늘 송장이 아직 출력되지 않았습니다</div>
+                <div class="sp-desc">송장 출력(출고 처리) 후 판매 대응 업무가 자동 생성됩니다</div>
+            </div>
+            """, unsafe_allow_html=True)
+
+        # ── ④ 컴팩트 태스크 렌더링 함수 ──
+        def _render_compact_tasks(task_list, section_label, section_class, row_class, icon, border_color):
+            """1열 컴팩트 태스크 리스트 렌더링 (미완료만)."""
+            if not task_list:
+                return
+            st.markdown(f"""
+            <div class="log-section {section_class}">
+                <span>{icon} {section_label}</span>
+                <span class="sec-count">{len(task_list)}건</span>
+            </div>
+            """, unsafe_allow_html=True)
+
+            for task in task_list:
+                tid = task["id"]
+                meta = task.get("meta", {})
+                p_name = meta.get("product_name", task.get("title", ""))
+                p_id = meta.get("product_id", "")
+                avg_q = meta.get("avg_qty", 0)
+                active_d = meta.get("active_days", 0)
+                total_d = meta.get("total_days", 5)
+                is_carried = tid in carried_ids
+                carry_html = '<span class="tr-badge bg-orange">⏰ 이월</span>' if is_carried else ""
+
+                st.markdown(f"""
+                <div class="task-row {row_class}">
+                    <span class="tr-icon">{icon}</span>
+                    <div class="tr-body">
+                        <div class="tr-name">{p_name}{carry_html}</div>
+                        <div class="tr-detail">일평균 {avg_q}개 → 오늘 0개 · {active_d}/{total_d}일 출고</div>
+                    </div>
+                </div>
+                """, unsafe_allow_html=True)
+
+                # 대응하기 버튼 (1개로 통합)
+                btn_cols = st.columns([1, 1, 1])
+                with btn_cols[0]:
+                    if st.button("🔍 판매처 상세", key=f"cpt_detail_{tid}"):
+                        st.session_state["_pending_shop_detail"] = {"pid": p_id, "pname": p_name, "avg_qty": avg_q}
+                        st.rerun()
+                with btn_cols[1]:
+                    if st.button("💰 가격확인", key=f"cpt_price_{tid}"):
+                        st.session_state.current_page = "price_monitor"
+                        st.session_state["_auto_price_keyword"] = p_name
+                        st.rerun()
+                with btn_cols[2]:
+                    if st.button("✅ 대응완료", key=f"cpt_done_{tid}", type="primary"):
+                        st.session_state["_pending_action_dialog"] = {"task_id": tid, "product_name": p_name}
+                        st.rerun()
+
+        # ── 🔴 긴급 대응 (미완료만) ──
+        _render_compact_tasks(urgent_pending, "긴급 대응", "urgent-sec", "urgent-row", "🔴", "#e53935")
+
+        # ── 🟡 추가 확인 (미완료만) ──
+        _render_compact_tasks(watch_pending, "추가 확인", "watch-sec", "watch-row", "🟡", "#f59e0b")
+
+        # ── ⑤ 수동 업무 (간결한 체크리스트) ──
         if manual_tasks:
-            st.markdown(f"**📋 수동 업무** ({len(manual_tasks)}건)")
-        for task in manual_tasks:
+            st.markdown(f"""
+            <div class="log-section">
+                <span>📋 일반 업무</span>
+                <span class="sec-count">{len(manual_tasks)}건</span>
+            </div>
+            """, unsafe_allow_html=True)
+
+        for task in manual_pending:
             tid = task["id"]
-            is_done = task.get("done", False)
             priority = task.get("priority", "normal")
             title = task.get("title", "")
-            done_at = task.get("done_at")
-            is_auto = task.get("auto", False)
             is_carried = tid in carried_ids
+            pri_label = {"urgent": "긴급", "normal": "일반", "routine": "정기"}.get(priority, "일반")
+            carry_html = ' <span class="tr-badge bg-orange">⏰ 이월</span>' if is_carried else ""
 
-            priority_label = {"urgent": "긴급", "normal": "일반", "routine": "정기"}.get(priority, "일반")
-            card_class = f"task-card priority-{priority}"
-            if is_done:
-                card_class += " done-task"
-
-            col_chk, col_info = st.columns([0.3, 9.7])
+            col_chk, col_info = st.columns([0.4, 9.6])
             with col_chk:
-                new_done = st.checkbox("완료", value=is_done, key=f"task_chk_{tid}", label_visibility="collapsed")
-                if new_done != is_done:
-                    toggle_task(tid, new_done)
+                new_done = st.checkbox("완료", value=False, key=f"task_chk_{tid}", label_visibility="collapsed")
+                if new_done:
+                    toggle_task(tid, True)
                     st.rerun()
             with col_info:
-                badges_html = f'<span class="priority-badge {priority}">{priority_label}</span>'
-                if is_auto:
-                    badges_html += '<span class="auto-badge">자동생성</span>'
-                if is_carried:
-                    badges_html += '<span class="carry-badge">⏰ 어제 미완료</span>'
-                done_info = ""
-                if is_done and done_at:
-                    done_info = f'<span style="font-size:0.72rem; opacity:0.5; margin-left:8px;">✅ {done_at} 완료</span>'
-                title_display = f'<span class="task-title">{title}</span>'
-                st.markdown(f'<div class="{card_class}">{badges_html} {title_display} {done_info}</div>', unsafe_allow_html=True)
+                st.markdown(f"""
+                <div class="manual-task">
+                    <span class="mt-pri pri-{priority}">{pri_label}</span>
+                    <span class="mt-title">{title}</span>{carry_html}
+                </div>
+                """, unsafe_allow_html=True)
 
-        # 새 업무 추가 폼
+        # ── ⑥ 완료된 업무 (접힘 영역) ──
+        if all_done:
+            with st.expander(f"✅ 완료된 업무 ({len(all_done)}건)", expanded=False):
+                for task in sorted(all_done, key=lambda x: x.get("done_at", ""), reverse=True):
+                    tid = task["id"]
+                    meta = task.get("meta", {})
+                    action = task.get("action")
+                    p_name = meta.get("product_name", task.get("title", ""))
+                    done_at = task.get("done_at", "")
+                    level = meta.get("level", "")
+
+                    if level == "urgent":
+                        _done_icon = "🔴"
+                        _badge_cls = "bg-red"
+                    elif level == "watch":
+                        _done_icon = "🟡"
+                        _badge_cls = "bg-orange"
+                    else:
+                        _done_icon = "📋"
+                        _badge_cls = "bg-blue"
+
+                    _action_badge = ""
+                    _memo_html = ""
+                    if action:
+                        _action_badge = f'<span class="tr-badge bg-green">{action.get("label", "✅")}</span>'
+                        if action.get("memo"):
+                            _memo_html = f' · 💬 {action["memo"]}'
+
+                    st.markdown(f"""
+                    <div class="task-row done-row" style="border-left: 4px solid #a5d6a7;">
+                        <span class="tr-icon">{_done_icon}</span>
+                        <div class="tr-body">
+                            <div class="tr-name">{p_name} {_action_badge}</div>
+                            <div class="tr-detail">{done_at} 완료{_memo_html}</div>
+                        </div>
+                    </div>
+                    """, unsafe_allow_html=True)
+
+        # ── ⑦ 새 업무 추가 폼 ──
         st.markdown("---")
         st.markdown("**\u2795 새 업무 추가**")
         with st.form("add_task_form", clear_on_submit=True):
