@@ -3872,22 +3872,24 @@ elif current_page == "daily_log":
                                 # 브랜드명 제거한 짧은 상품명
                                 short_name = p_name.replace(f"{brand}-", "").replace(f"{brand} ", "") if brand != p_name else p_name
 
-                                # 상품 정보 행
-                                st.markdown(f"""
-                                <div class="task-row {row_class}" style="margin-bottom:0.15rem; padding:0.35rem 0.6rem;">
-                                    <span class="tr-icon" style="font-size:0.85rem;">{icon}</span>
-                                    <div class="tr-body">
-                                        <div class="tr-name" style="font-size:0.82rem;">{short_name}{carry_badge}</div>
-                                        <div class="tr-detail">일평균 {avg_q}개 · {active_d}/{total_d}일</div>
+                                # 상품 정보 + 액션 selectbox 한 줄
+                                c_info, c_act = st.columns([6, 4])
+                                with c_info:
+                                    st.markdown(f"""
+                                    <div class="task-row {row_class}" style="margin-bottom:0; padding:0.3rem 0.5rem;">
+                                        <span class="tr-icon" style="font-size:0.82rem;">{icon}</span>
+                                        <div class="tr-body">
+                                            <div class="tr-name" style="font-size:0.8rem;">{short_name}{carry_badge}</div>
+                                            <div class="tr-detail">일평균 {avg_q}개 · {active_d}/{total_d}일</div>
+                                        </div>
                                     </div>
-                                </div>
-                                """, unsafe_allow_html=True)
-                                # 액션 selectbox
-                                sel_action = st.selectbox(
-                                    "액션", options=list(_ACTION_OPTIONS.keys()),
-                                    format_func=lambda x: _ACTION_OPTIONS[x],
-                                    key=f"act_{tid}", label_visibility="collapsed",
-                                )
+                                    """, unsafe_allow_html=True)
+                                with c_act:
+                                    sel_action = st.selectbox(
+                                        "액션", options=list(_ACTION_OPTIONS.keys()),
+                                        format_func=lambda x: _ACTION_OPTIONS[x],
+                                        key=f"act_{tid}", label_visibility="collapsed",
+                                    )
                                 if sel_action != "select":
                                     if sel_action == "detail":
                                         st.session_state["_pending_shop_detail"] = {"pid": p_id, "pname": p_name, "avg_qty": avg_q}
