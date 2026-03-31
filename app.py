@@ -1058,15 +1058,15 @@ def fetch_sales_insight() -> dict:
             if isinstance(val, dict):
                 today_products.add(pid)
 
-    # 이상 징후: 최근 영업일 70%+ 출고했지만 오늘 미출고
-    threshold = max(len(work_days) * 0.7, 2)
-    anomalies = []
+    # 송장 미출력 판단: 오늘 출고가 0이면 아직 송장을 뽑지 않은 상태
+    today_shipped = len(today_products) > 0
+
+    # 일별 판매 데이터 집계 (송장 여부와 무관하게 항상 계산)
     daily_sellers = []
     for pid, days in product_daily.items():
         active_count = sum(1 for d in work_days if days.get(d, 0) > 0)
         total_qty = sum(days.get(d, 0) for d in work_days)
         avg_qty = total_qty / len(work_days) if work_days else 0
-
         daily_sellers.append({
             "product_id": pid,
             "active_days": active_count,
@@ -1075,18 +1075,25 @@ def fetch_sales_insight() -> dict:
             "avg_qty": round(avg_qty, 1),
             "today_shipped": pid in today_products,
         })
-
-        if active_count >= threshold and pid not in today_products:
-            anomalies.append({
-                "product_id": pid,
-                "active_days": active_count,
-                "total_days": len(work_days),
-                "avg_qty": round(avg_qty, 1),
-                "total_qty": total_qty,
-            })
-
-    anomalies.sort(key=lambda x: -x["avg_qty"])
     daily_sellers.sort(key=lambda x: (-x["active_days"], -x["avg_qty"]))
+
+    # 이상 징후: 송장 출력 후에만 판매 대응 필요 상품 계산
+    anomalies = []
+    if today_shipped:
+        threshold = max(len(work_days) * 0.7, 2)
+        for pid, days in product_daily.items():
+            active_count = sum(1 for d in work_days if days.get(d, 0) > 0)
+            total_qty = sum(days.get(d, 0) for d in work_days)
+            avg_qty = total_qty / len(work_days) if work_days else 0
+            if active_count >= threshold and pid not in today_products:
+                anomalies.append({
+                    "product_id": pid,
+                    "active_days": active_count,
+                    "total_days": len(work_days),
+                    "avg_qty": round(avg_qty, 1),
+                    "total_qty": total_qty,
+                })
+        anomalies.sort(key=lambda x: -x["avg_qty"])
 
     return {
         "anomalies": anomalies,
@@ -1094,7 +1101,8 @@ def fetch_sales_insight() -> dict:
         "work_days": work_days,
         "today_count": len(today_products),
         "total_tracked": len(product_daily),
-        "status": "분석 완료",
+        "today_shipped": today_shipped,
+        "status": "분석 완료" if today_shipped else "송장 미출력",
     }
 
 
@@ -2576,10 +2584,11 @@ if current_page == "dashboard":
 
     insight_data = fetch_sales_insight()
 
-    if insight_data["status"] == "분석 완료":
+    if insight_data["status"] in ("분석 완료", "송장 미출력"):
         anomalies = insight_data["anomalies"]
         daily_sellers = insight_data["daily_sellers"]
-        dormant_count = len([s for s in daily_sellers if not s["today_shipped"]])
+        _today_shipped = insight_data.get("today_shipped", False)
+        dormant_count = len([s for s in daily_sellers if not s["today_shipped"]]) if _today_shipped else 0
 
         # 요약 카드
         ins_cols = st.columns(4)
@@ -2591,34 +2600,45 @@ if current_page == "dashboard":
             <div class="sub">최근 5영업일</div>
         </div>
         """, unsafe_allow_html=True)
+        _ship_label = f"{insight_data['today_count']}개" if _today_shipped else "⏳ 대기"
+        _ship_sub = "현재까지" if _today_shipped else "송장 미출력"
         ins_cols[1].markdown(f"""
         <div class="kpi-card">
             <div class="icon">📦</div>
             <div class="label">오늘 출고</div>
-            <div class="value">{insight_data['today_count']}개</div>
-            <div class="sub">현재까지</div>
+            <div class="value">{_ship_label}</div>
+            <div class="sub">{_ship_sub}</div>
         </div>
         """, unsafe_allow_html=True)
-        anomaly_color = "#f5576c" if anomalies else "#22c55e"
+        if _today_shipped:
+            anomaly_color = "#f5576c" if anomalies else "#22c55e"
+            _anomaly_label = f"{len(anomalies)}개"
+            _anomaly_sub = "매일 출고 → 오늘 0"
+        else:
+            anomaly_color = "#9ca3af"
+            _anomaly_label = "— "
+            _anomaly_sub = "송장 출력 후 확인"
         ins_cols[2].markdown(f"""
         <div class="kpi-card" style="border-color: {anomaly_color}40;">
             <div class="icon">🚨</div>
             <div class="label">판매 대응 필요</div>
-            <div class="value" style="color: {anomaly_color};">{len(anomalies)}개</div>
-            <div class="sub">매일 출고 → 오늘 0</div>
+            <div class="value" style="color: {anomaly_color};">{_anomaly_label}</div>
+            <div class="sub">{_anomaly_sub}</div>
         </div>
         """, unsafe_allow_html=True)
         ins_cols[3].markdown(f"""
         <div class="kpi-card">
             <div class="icon">💤</div>
             <div class="label">오늘 미출고</div>
-            <div class="value">{dormant_count}개</div>
-            <div class="sub">최근 출고 이력 有</div>
+            <div class="value">{dormant_count if _today_shipped else "—"}개</div>
+            <div class="sub">{"최근 출고 이력 有" if _today_shipped else "송장 출력 후 확인"}</div>
         </div>
         """, unsafe_allow_html=True)
 
         # 대시보드에서는 간단 요약만 표시
-        if anomalies:
+        if not _today_shipped:
+            st.info("📋 오늘 송장이 아직 출력되지 않았습니다. 송장 출력(출고 처리) 후 판매 대응 필요 상품이 자동으로 표시됩니다.")
+        elif anomalies:
             product_names_map = fetch_product_names()
             st.markdown(f"**판매 대응 필요 {len(anomalies)}개 상품** — 상세 내용은 '판매 대응' 메뉴에서 확인하세요.")
             for item in anomalies[:5]:
@@ -2671,10 +2691,15 @@ elif current_page == "sales_inventory":
     product_names_map = fetch_product_names()
     shop_list = fetch_shop_list()
 
-    if insight_data["status"] == "분석 완료":
+    if insight_data["status"] in ("분석 완료", "송장 미출력"):
         anomalies = insight_data["anomalies"]
         daily_sellers = insight_data["daily_sellers"]
-        dormant_count = len([s for s in daily_sellers if not s["today_shipped"]])
+        _today_shipped_inv = insight_data.get("today_shipped", False)
+        dormant_count = len([s for s in daily_sellers if not s["today_shipped"]]) if _today_shipped_inv else 0
+
+        # 송장 미출력 안내
+        if not _today_shipped_inv:
+            st.info("📋 오늘 송장이 아직 출력되지 않았습니다. 송장 출력(출고 처리) 후 판매 대응 필요 상품이 자동으로 표시됩니다.")
 
         # 요약 KPI 카드
         ins_cols = st.columns(4)
@@ -2686,29 +2711,38 @@ elif current_page == "sales_inventory":
             <div class="sub">최근 5영업일</div>
         </div>
         """, unsafe_allow_html=True)
+        _ship_label2 = f"{insight_data['today_count']}개" if _today_shipped_inv else "⏳ 대기"
+        _ship_sub2 = "현재까지" if _today_shipped_inv else "송장 미출력"
         ins_cols[1].markdown(f"""
         <div class="kpi-card">
             <div class="icon">📦</div>
             <div class="label">오늘 출고</div>
-            <div class="value">{insight_data['today_count']}개</div>
-            <div class="sub">현재까지</div>
+            <div class="value">{_ship_label2}</div>
+            <div class="sub">{_ship_sub2}</div>
         </div>
         """, unsafe_allow_html=True)
-        anomaly_color = "#f5576c" if anomalies else "#22c55e"
+        if _today_shipped_inv:
+            anomaly_color = "#f5576c" if anomalies else "#22c55e"
+            _anom_val = f"{len(anomalies)}개"
+            _anom_sub = "매일 출고 → 오늘 0"
+        else:
+            anomaly_color = "#9ca3af"
+            _anom_val = "—"
+            _anom_sub = "송장 출력 후 확인"
         ins_cols[2].markdown(f"""
         <div class="kpi-card" style="border-color: {anomaly_color}40;">
             <div class="icon">🚨</div>
             <div class="label">판매 대응 필요</div>
-            <div class="value" style="color: {anomaly_color};">{len(anomalies)}개</div>
-            <div class="sub">매일 출고 → 오늘 0</div>
+            <div class="value" style="color: {anomaly_color};">{_anom_val}</div>
+            <div class="sub">{_anom_sub}</div>
         </div>
         """, unsafe_allow_html=True)
         ins_cols[3].markdown(f"""
         <div class="kpi-card">
             <div class="icon">💤</div>
             <div class="label">오늘 미출고</div>
-            <div class="value">{dormant_count}개</div>
-            <div class="sub">최근 출고 이력 有</div>
+            <div class="value">{dormant_count if _today_shipped_inv else "—"}개</div>
+            <div class="sub">{"최근 출고 이력 有" if _today_shipped_inv else "송장 출력 후 확인"}</div>
         </div>
         """, unsafe_allow_html=True)
 
@@ -2894,7 +2928,9 @@ elif current_page == "sales_inventory":
                 st.info("오늘 출고된 상품이 아직 없습니다.")
 
         with tab_anomaly:
-            if anomalies:
+            if not _today_shipped_inv:
+                st.info("📋 송장 출력 후 판매 대응 필요 상품이 표시됩니다.")
+            elif anomalies:
                 anomaly_sorted = sorted(anomalies, key=lambda x: (extract_brand(product_names_map.get(x["product_id"], "")), -x.get("avg_qty", 0)))
                 _render_product_list(anomaly_sorted, "tab_anom")
             else:
@@ -3393,8 +3429,10 @@ elif current_page == "daily_log":
     try:
         insight = fetch_sales_insight()
         anomalies = insight.get("anomalies", [])
+        _today_shipped_log = insight.get("today_shipped", False)
     except Exception:
         anomalies = []
+        _today_shipped_log = False
 
     try:
         _pname_map = fetch_product_names()
@@ -3408,22 +3446,24 @@ elif current_page == "daily_log":
     if _old_auto:
         save_tasks()
 
-    # ── 실시간 동기화: 출고 완료된 자동태스크 자동 완료 처리 ──
-    current_anomaly_pids = {a.get("product_id", "") for a in anomalies}
-    _sync_changed = False
-    for t in all_tasks:
-        if not (t.get("auto") and t["due"] == today_str and t.get("meta")):
-            continue
-        t_pid = t["meta"].get("product_id", "")
-        if t_pid and t_pid not in current_anomaly_pids and not t.get("done"):
-            # 현재 anomalies에 없음 = 출고 완료됨 → 자동 완료
-            t["done"] = True
-            t["done_at"] = datetime.now().strftime("%Y-%m-%d %H:%M")
-            _sync_changed = True
-    if _sync_changed:
-        save_tasks()
+    # 송장 출력 후에만 자동태스크 생성/동기화
+    if _today_shipped_log:
+        # ── 실시간 동기화: 출고 완료된 자동태스크 자동 완료 처리 ──
+        current_anomaly_pids = {a.get("product_id", "") for a in anomalies}
+        _sync_changed = False
+        for t in all_tasks:
+            if not (t.get("auto") and t["due"] == today_str and t.get("meta")):
+                continue
+            t_pid = t["meta"].get("product_id", "")
+            if t_pid and t_pid not in current_anomaly_pids and not t.get("done"):
+                # 현재 anomalies에 없음 = 출고 완료됨 → 자동 완료
+                t["done"] = True
+                t["done_at"] = datetime.now().strftime("%Y-%m-%d %H:%M")
+                _sync_changed = True
+        if _sync_changed:
+            save_tasks()
 
-    # product_id 기반 중복 검사 + 신규 추가
+    # product_id 기반 중복 검사 + 신규 추가 (송장 출력 후에만)
     existing_auto_pids = {t.get("meta", {}).get("product_id") for t in all_tasks if t.get("auto") and t["due"] == today_str and t.get("meta")}
     for anom in anomalies:
         pid = anom.get("product_id", "")
@@ -3510,6 +3550,8 @@ elif current_page == "daily_log":
         manual_tasks = [t for t in today_tasks if not (t.get("auto") and t.get("meta"))]
 
         # ── 자동생성 판매대응 태스크: 2열 컴팩트 그리드 ──
+        if not _today_shipped_log and not auto_tasks:
+            st.info("📋 오늘 송장이 아직 출력되지 않았습니다. 송장 출력 후 판매 대응 필요 업무가 자동 생성됩니다.")
         if auto_tasks:
             st.markdown(f"**🚨 판매 대응 필요** ({len(auto_tasks)}건)")
             grid_cols = st.columns(2)
