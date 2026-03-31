@@ -3509,6 +3509,14 @@ elif current_page == "daily_log":
         display: flex; justify-content: space-between; align-items: center;
     }
 
+    /* ── selectbox 손가락 커서 ── */
+    [data-testid="stSelectbox"] > div > div {
+        cursor: pointer !important;
+    }
+    [data-testid="stSelectbox"] svg {
+        cursor: pointer !important;
+    }
+
     /* ── 업무일지 내 버튼 축소 ── */
     [data-testid="stVerticalBlock"] [data-testid="stButton"] button {
         font-size: 0.75rem !important;
