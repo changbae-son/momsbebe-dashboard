@@ -3813,9 +3813,30 @@ elif current_page == "daily_log":
             </div>
             """, unsafe_allow_html=True)
 
-        # ── ④ 컴팩트 태스크 렌더링 함수 ──
-        def _render_compact_tasks(task_list, section_label, section_class, row_class, icon, border_color):
-            """1열 컴팩트 태스크 리스트 렌더링 (미완료만)."""
+        # ── ④ 브랜드별 그룹핑 + 컴팩트 테이블 렌더링 ──
+        _ACTION_OPTIONS = {
+            "select": "— 액션 선택 —",
+            "detail": "🔍 판매처 상세",
+            "price": "💰 가격 확인",
+            "page": "📝 상세페이지",
+            "done": "✅ 대응 완료",
+        }
+
+        def _group_by_brand(task_list):
+            """태스크를 브랜드별로 그룹핑."""
+            groups = {}
+            for t in task_list:
+                meta = t.get("meta", {})
+                pname = meta.get("product_name", t.get("title", ""))
+                brand = extract_brand(pname)
+                if brand not in groups:
+                    groups[brand] = []
+                groups[brand].append(t)
+            # 건수 많은 브랜드순 정렬
+            return dict(sorted(groups.items(), key=lambda x: -len(x[1])))
+
+        def _render_brand_table(task_list, section_label, section_class, row_class, icon, default_expanded=True):
+            """브랜드별 그룹핑된 컴팩트 테이블 렌더링."""
             if not task_list:
                 return
             st.markdown(f"""
@@ -3825,48 +3846,61 @@ elif current_page == "daily_log":
             </div>
             """, unsafe_allow_html=True)
 
-            for task in task_list:
-                tid = task["id"]
-                meta = task.get("meta", {})
-                p_name = meta.get("product_name", task.get("title", ""))
-                p_id = meta.get("product_id", "")
-                avg_q = meta.get("avg_qty", 0)
-                active_d = meta.get("active_days", 0)
-                total_d = meta.get("total_days", 5)
-                is_carried = tid in carried_ids
-                carry_html = '<span class="tr-badge bg-orange">⏰ 이월</span>' if is_carried else ""
+            brand_groups = _group_by_brand(task_list)
 
-                st.markdown(f"""
-                <div class="task-row {row_class}">
-                    <span class="tr-icon">{icon}</span>
-                    <div class="tr-body">
-                        <div class="tr-name">{p_name}{carry_html}</div>
-                        <div class="tr-detail">일평균 {avg_q}개 → 오늘 0개 · {active_d}/{total_d}일 출고</div>
-                    </div>
-                </div>
-                """, unsafe_allow_html=True)
+            for brand, tasks in brand_groups.items():
+                with st.expander(f"📦 {brand} ({len(tasks)}건)", expanded=default_expanded):
+                    for task in tasks:
+                        tid = task["id"]
+                        meta = task.get("meta", {})
+                        p_name = meta.get("product_name", task.get("title", ""))
+                        p_id = meta.get("product_id", "")
+                        avg_q = meta.get("avg_qty", 0)
+                        active_d = meta.get("active_days", 0)
+                        total_d = meta.get("total_days", 5)
+                        is_carried = tid in carried_ids
+                        carry_badge = '<span class="tr-badge bg-orange">⏰</span>' if is_carried else ""
+                        # 브랜드명 제거한 짧은 상품명
+                        short_name = p_name.replace(f"{brand}-", "").replace(f"{brand} ", "") if brand != p_name else p_name
 
-                # 대응하기 버튼 (1개로 통합)
-                btn_cols = st.columns([1, 1, 1])
-                with btn_cols[0]:
-                    if st.button("🔍 판매처 상세", key=f"cpt_detail_{tid}"):
-                        st.session_state["_pending_shop_detail"] = {"pid": p_id, "pname": p_name, "avg_qty": avg_q}
-                        st.rerun()
-                with btn_cols[1]:
-                    if st.button("💰 가격확인", key=f"cpt_price_{tid}"):
-                        st.session_state.current_page = "price_monitor"
-                        st.session_state["_auto_price_keyword"] = p_name
-                        st.rerun()
-                with btn_cols[2]:
-                    if st.button("✅ 대응완료", key=f"cpt_done_{tid}", type="primary"):
-                        st.session_state["_pending_action_dialog"] = {"task_id": tid, "product_name": p_name}
-                        st.rerun()
+                        # 1줄 카드 + selectbox 액션
+                        c_info, c_action = st.columns([7, 3])
+                        with c_info:
+                            st.markdown(f"""
+                            <div class="task-row {row_class}" style="margin-bottom:0.15rem; padding:0.35rem 0.6rem;">
+                                <span class="tr-icon" style="font-size:0.85rem;">{icon}</span>
+                                <div class="tr-body">
+                                    <div class="tr-name" style="font-size:0.82rem;">{short_name}{carry_badge}</div>
+                                    <div class="tr-detail">일평균 {avg_q}개 · {active_d}/{total_d}일</div>
+                                </div>
+                            </div>
+                            """, unsafe_allow_html=True)
+                        with c_action:
+                            sel_action = st.selectbox(
+                                "액션", options=list(_ACTION_OPTIONS.keys()),
+                                format_func=lambda x: _ACTION_OPTIONS[x],
+                                key=f"act_{tid}", label_visibility="collapsed",
+                            )
+                            if sel_action != "select":
+                                if sel_action == "detail":
+                                    st.session_state["_pending_shop_detail"] = {"pid": p_id, "pname": p_name, "avg_qty": avg_q}
+                                    st.rerun()
+                                elif sel_action == "price":
+                                    st.session_state.current_page = "price_monitor"
+                                    st.session_state["_auto_price_keyword"] = p_name
+                                    st.rerun()
+                                elif sel_action == "page":
+                                    st.session_state["_pending_product_pages"] = {"pid": p_id, "pname": p_name, "avg_qty": avg_q}
+                                    st.rerun()
+                                elif sel_action == "done":
+                                    st.session_state["_pending_action_dialog"] = {"task_id": tid, "product_name": p_name}
+                                    st.rerun()
 
-        # ── 🔴 긴급 대응 (미완료만) ──
-        _render_compact_tasks(urgent_pending, "긴급 대응", "urgent-sec", "urgent-row", "🔴", "#e53935")
+        # ── 🔴 긴급 대응 (미완료 — 기본 펼침) ──
+        _render_brand_table(urgent_pending, "긴급 대응", "urgent-sec", "urgent-row", "🔴", default_expanded=True)
 
-        # ── 🟡 추가 확인 (미완료만) ──
-        _render_compact_tasks(watch_pending, "추가 확인", "watch-sec", "watch-row", "🟡", "#f59e0b")
+        # ── 🟡 추가 확인 (미완료 — 기본 접힘) ──
+        _render_brand_table(watch_pending, "추가 확인", "watch-sec", "watch-row", "🟡", default_expanded=False)
 
         # ── ⑤ 수동 업무 (간결한 체크리스트) ──
         if manual_tasks:
@@ -3912,13 +3946,10 @@ elif current_page == "daily_log":
 
                     if level == "urgent":
                         _done_icon = "🔴"
-                        _badge_cls = "bg-red"
                     elif level == "watch":
                         _done_icon = "🟡"
-                        _badge_cls = "bg-orange"
                     else:
                         _done_icon = "📋"
-                        _badge_cls = "bg-blue"
 
                     _action_badge = ""
                     _memo_html = ""
