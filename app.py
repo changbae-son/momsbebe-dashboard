@@ -14,9 +14,11 @@ import plotly.express as px
 import plotly.graph_objects as go
 import json
 import os
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import uuid
 import calendar
+
+KST = timezone(timedelta(hours=9))
 
 # ─────────────────────────────────────────────
 # 페이지 기본 설정
@@ -878,8 +880,8 @@ def fetch_yesterday_sales() -> dict:
     if not keys:
         return {"total_sales": 0, "order_count": 0, "status": "미연동"}
 
-    yesterday = (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%d")
-    day_before = (datetime.now() - timedelta(days=2)).strftime("%Y-%m-%d")
+    yesterday = (datetime.now(KST) - timedelta(days=1)).strftime("%Y-%m-%d")
+    day_before = (datetime.now(KST) - timedelta(days=2)).strftime("%Y-%m-%d")
 
     # 어제 주문 조회
     data = call_onewms_api("get_order_info", {
@@ -1015,7 +1017,7 @@ def fetch_sales_insight() -> dict:
     if not keys:
         return {"anomalies": [], "daily_sellers": [], "status": "미연동"}
 
-    today = datetime.now()
+    today = datetime.now(KST)
     # 최근 7일 범위 (주말 포함해서 넉넉하게)
     start = (today - timedelta(days=8)).strftime("%Y-%m-%d")
     yesterday = (today - timedelta(days=1)).strftime("%Y-%m-%d")
@@ -2003,7 +2005,7 @@ def show_action_dialog():
 def quick_shop_detail(pid: str, pname: str, avg_qty=0, today_shipped=None):
     """업무 일지 등에서 바로 판매처 상세 팝업을 띄우는 헬퍼."""
     from datetime import timedelta as _td
-    _today = datetime.now()
+    _today = datetime.now(KST)
     dates = tuple((_today - _td(days=i)).strftime("%Y-%m-%d") for i in range(1, 8))
     orders_map = fetch_orders_parallel(dates)
     shop_list = fetch_shop_list()
@@ -2150,7 +2152,7 @@ with st.sidebar:
         st.caption("🔸 원싱크 — 미연동")
 
     st.markdown("---")
-    now = datetime.now()
+    now = datetime.now(KST)
     st.caption(f"📅 {now.strftime('%Y년 %m월 %d일')}  ⏰ {now.strftime('%H:%M')}")
 
 
@@ -2502,7 +2504,7 @@ def show_detail_analysis(data: dict, all_df):
 # ─────────────────────────────────────────────
 # 메인 - 헤더 배너
 # ─────────────────────────────────────────────
-today = datetime.now()
+today = datetime.now(KST)
 weekdays = ["월", "화", "수", "목", "금", "토", "일"]
 weekday_kr = weekdays[today.weekday()]
 
@@ -2556,7 +2558,7 @@ if current_page == "dashboard":
         if st.button("💾 지시사항 저장", type="primary"):
             ceo_data = {
                 "message": new_msg,
-                "updated": datetime.now().strftime("%Y-%m-%d %H:%M"),
+                "updated": datetime.now(KST).strftime("%Y-%m-%d %H:%M"),
             }
             save_json(CEO_MSG_FILE, ceo_data)
             st.success("저장되었습니다!")
@@ -2817,7 +2819,7 @@ elif current_page == "sales_inventory":
             shop_dict = dict(_shop_list_tuple)
             result = {}
             date_strings = tuple(
-                (datetime.now() - timedelta(days=d)).strftime("%Y-%m-%d") for d in range(1, 8)
+                (datetime.now(KST) - timedelta(days=d)).strftime("%Y-%m-%d") for d in range(1, 8)
             )
             all_date_orders = fetch_orders_parallel(date_strings)
             for date_str in date_strings:
@@ -3439,7 +3441,7 @@ elif current_page == "daily_log":
     """, unsafe_allow_html=True)
 
     # ── 데이터 로드 ──
-    now = datetime.now()
+    now = datetime.now(KST)
     today_str = now.strftime("%Y-%m-%d")
     yesterday_str = (now - timedelta(days=1)).strftime("%Y-%m-%d")
 
@@ -3532,7 +3534,7 @@ elif current_page == "daily_log":
             t_pid = t["meta"].get("product_id", "")
             if t_pid and t_pid not in _all_active_pids and not t.get("done"):
                 t["done"] = True
-                t["done_at"] = datetime.now().strftime("%Y-%m-%d %H:%M")
+                t["done_at"] = datetime.now(KST).strftime("%Y-%m-%d %H:%M")
                 _sync_changed = True
         if _sync_changed:
             save_tasks()
@@ -3616,13 +3618,13 @@ elif current_page == "daily_log":
         for t in all_tasks:
             if t["id"] == _ar_tid:
                 t["done"] = True
-                t["done_at"] = datetime.now().strftime("%Y-%m-%d %H:%M")
+                t["done_at"] = datetime.now(KST).strftime("%Y-%m-%d %H:%M")
                 t["action"] = {
                     "type": _action_result["action_type"],
                     "label": ACTION_TYPES.get(_action_result["action_type"], ""),
                     "memo": _action_result.get("memo", ""),
                     "worker": "MD",
-                    "time": datetime.now().strftime("%H:%M"),
+                    "time": datetime.now(KST).strftime("%H:%M"),
                 }
                 break
         save_tasks()
@@ -3997,6 +3999,6 @@ elif current_page == "daily_log":
 # ─────────────────────────────────────────────
 st.markdown(f"""
 <div class="footer">
-    신아인터네셔날(ShinA) 업무 대시보드 v2.0 · {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
+    신아인터네셔날(ShinA) 업무 대시보드 v2.0 · {datetime.now(KST).strftime('%Y-%m-%d %H:%M:%S')}
 </div>
 """, unsafe_allow_html=True)
