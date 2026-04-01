@@ -3603,15 +3603,15 @@ elif current_page == "daily_log":
     st.markdown("""
     <style>
     /* ── KPI 요약 카드 ── */
-    .log-kpi-row { display: flex; gap: 0.6rem; margin-bottom: 1rem; }
+    .log-kpi-row { display: flex; gap: 0.4rem; margin-bottom: 0.6rem; }
     .log-kpi {
-        flex: 1; border-radius: 12px; padding: 0.7rem 0.8rem; text-align: center;
-        box-shadow: 0 1px 6px rgba(0,0,0,0.07); position: relative; overflow: hidden;
+        flex: 1; border-radius: 10px; padding: 0.35rem 0.5rem; text-align: center;
+        box-shadow: 0 1px 4px rgba(0,0,0,0.06); position: relative; overflow: hidden;
     }
-    .log-kpi .kpi-icon { font-size: 1.3rem; }
-    .log-kpi .kpi-label { font-size: 0.72rem; color: #666; margin-top: 2px; }
-    .log-kpi .kpi-value { font-size: 1.4rem; font-weight: 800; margin: 2px 0; }
-    .log-kpi .kpi-sub { font-size: 0.68rem; color: #999; }
+    .log-kpi .kpi-icon { font-size: 0.95rem; }
+    .log-kpi .kpi-label { font-size: 0.65rem; color: #666; margin-top: 1px; }
+    .log-kpi .kpi-value { font-size: 1.05rem; font-weight: 800; margin: 1px 0; }
+    .log-kpi .kpi-sub { font-size: 0.6rem; color: #999; }
     .log-kpi.urgent { background: linear-gradient(135deg, #fff5f5, #ffe0e0); border: 1px solid #ffcdd2; }
     .log-kpi.urgent .kpi-value { color: #d32f2f; }
     .log-kpi.watch { background: linear-gradient(135deg, #fffbf0, #fff3e0); border: 1px solid #ffe0b2; }
