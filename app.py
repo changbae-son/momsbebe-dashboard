@@ -3668,14 +3668,14 @@ elif current_page == "daily_log":
     .task-row.urgent-row { border-left: 4px solid #e53935; }
     .task-row.watch-row { border-left: 4px solid #f59e0b; }
     .task-row.manual-row { border-left: 4px solid #1e88e5; }
-    .task-row.done-row { opacity: 0.5; background: #fafafa; }
+    .task-row.done-row { opacity: 1; background: #f9fdf9; }
     .task-row .tr-icon { font-size: 1rem; flex-shrink: 0; }
     .task-row .tr-body { flex: 1; min-width: 0; }
     .task-row .tr-name {
         font-weight: 700; font-size: 0.85rem; color: #333;
         white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
     }
-    .task-row.done-row .tr-name { text-decoration: line-through; color: #999; }
+    .task-row.done-row .tr-name { text-decoration: none; color: #333; }
     .task-row .tr-detail {
         font-size: 0.72rem; color: #888; margin-top: 1px;
         white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
@@ -3982,7 +3982,7 @@ elif current_page == "daily_log":
         st.toast(f"✅ 대응 기록 완료")
 
     # ── 3 Tabs ──
-    tab1, tab2, tab3 = st.tabs(["\U0001f4c5 오늘 업무", "\U0001f4c6 주간/월간 계획", "\U0001f4cc 공유 메모"])
+    tab1, tab_log, tab2, tab3 = st.tabs(["\U0001f4c5 오늘 업무", "\U0001f4ca 대응 로그", "\U0001f4c6 주간/월간 계획", "\U0001f4cc 공유 메모"])
 
     # ════════════════════════════════════════════
     # Tab 1: 오늘 업무
@@ -4055,32 +4055,7 @@ elif current_page == "daily_log":
         </div>
         """, unsafe_allow_html=True)
 
-        # ── ② CEO 대응 로그 (상단 노출) ──
-        if _action_tasks:
-            with st.expander(f"📊 오늘 대응 로그 ({len(_action_tasks)}건)", expanded=True):
-                _log_html = ""
-                for t in sorted(_action_tasks, key=lambda x: x.get("done_at", ""), reverse=True):
-                    _a = t.get("action", {})
-                    _time = _a.get("time", t.get("done_at", "")[-5:])
-                    _type_lbl = _a.get("label", "✅")
-                    _pname = t.get("meta", {}).get("product_name", t.get("title", ""))
-                    _detail = _a.get("detail", "")
-                    _memo = _a.get("memo", "")
-                    _detail_html = f'<div style="font-size:0.78rem; color:#1565c0; margin-top:2px;">📋 {_detail}</div>' if _detail else ""
-                    _memo_html = f'<div style="font-size:0.72rem; color:#888; margin-top:1px;">💬 {_memo}</div>' if _memo else ""
-                    _log_html += f"""
-                    <div style="padding:0.5rem 0.7rem; border-bottom:1px solid #eee;">
-                        <div style="display:flex; align-items:center; gap:0.5rem;">
-                            <span style="font-size:0.72rem; color:#999; width:40px; flex-shrink:0;">{_time}</span>
-                            <span style="font-size:0.82rem; font-weight:600; width:120px; flex-shrink:0;">{_type_lbl}</span>
-                            <span style="font-size:0.82rem; flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">{_pname}</span>
-                        </div>
-                        {_detail_html}
-                        {_memo_html}
-                    </div>"""
-                st.markdown(f'<div style="background:#fafafa; border-radius:10px; overflow:hidden;">{_log_html}</div>', unsafe_allow_html=True)
-
-        # ── ③ 송장 미출력 시 dim 처리 ──
+        # ── 송장 미출력 시 dim 처리 ──
         if not _today_shipped_log and not auto_tasks:
             st.markdown("""
             <div class="shipment-pending">
@@ -4182,6 +4157,54 @@ elif current_page == "daily_log":
                                         st.session_state["_pending_action_dialog"] = {"task_id": tid, "product_name": p_name}
                                         st.rerun()
 
+        # ── ✅ 완료된 업무 (긴급대응 위) ──
+        if all_done:
+            with st.expander(f"✅ 완료된 업무 ({len(all_done)}건)", expanded=True):
+                for task in sorted(all_done, key=lambda x: x.get("done_at", ""), reverse=True):
+                    tid = task["id"]
+                    meta = task.get("meta", {})
+                    action = task.get("action")
+                    p_name = meta.get("product_name", task.get("title", ""))
+                    done_at = task.get("done_at", "")
+                    level = meta.get("level", "")
+
+                    # 원래 레벨 색상 유지
+                    if level == "urgent":
+                        _done_icon = "🔴"
+                        _border_color = "#e53935"
+                    elif level == "watch":
+                        _done_icon = "🟡"
+                        _border_color = "#f59e0b"
+                    else:
+                        _done_icon = "📋"
+                        _border_color = "#1e88e5"
+
+                    # 과정 로그 조립: 대응타입 → 개선내용 → 메모 → 시간
+                    _process_parts = []
+                    if action:
+                        _act_label = action.get("label", "✅ 완료")
+                        _process_parts.append(f'<span style="font-weight:600;">{_act_label}</span>')
+                        if action.get("detail"):
+                            _process_parts.append(f'<span style="color:#1565c0;">📋 {action["detail"]}</span>')
+                        if action.get("memo"):
+                            _process_parts.append(f'<span style="color:#777;">💬 {action["memo"]}</span>')
+                        _act_time = action.get("time", done_at[-5:] if len(done_at) >= 5 else done_at)
+                        _process_parts.append(f'<span style="color:#999;">{_act_time}</span>')
+                    else:
+                        _process_parts.append(f'<span style="color:#999;">{done_at} 완료</span>')
+
+                    _process_log = ' · '.join(_process_parts)
+
+                    st.markdown(f"""
+                    <div class="task-row done-row" style="border-left: 4px solid {_border_color};">
+                        <span class="tr-icon">{_done_icon}</span>
+                        <div class="tr-body">
+                            <div class="tr-name" style="white-space:normal;">{p_name}</div>
+                            <div class="tr-detail" style="font-size:0.8rem; white-space:normal; margin-top:3px;">{_process_log}</div>
+                        </div>
+                    </div>
+                    """, unsafe_allow_html=True)
+
         # ── 🔴 긴급 대응 (미완료 — 기본 펼침) ──
         _render_brand_table(urgent_pending, "긴급 대응", "urgent-sec", "urgent-row", "🔴", default_expanded=True)
 
@@ -4219,45 +4242,7 @@ elif current_page == "daily_log":
                 </div>
                 """, unsafe_allow_html=True)
 
-        # ── ⑥ 완료된 업무 (접힘 영역) ──
-        if all_done:
-            with st.expander(f"✅ 완료된 업무 ({len(all_done)}건)", expanded=False):
-                for task in sorted(all_done, key=lambda x: x.get("done_at", ""), reverse=True):
-                    tid = task["id"]
-                    meta = task.get("meta", {})
-                    action = task.get("action")
-                    p_name = meta.get("product_name", task.get("title", ""))
-                    done_at = task.get("done_at", "")
-                    level = meta.get("level", "")
-
-                    if level == "urgent":
-                        _done_icon = "🔴"
-                    elif level == "watch":
-                        _done_icon = "🟡"
-                    else:
-                        _done_icon = "📋"
-
-                    _action_badge = ""
-                    _detail_html = ""
-                    _memo_html = ""
-                    if action:
-                        _action_badge = f'<span class="tr-badge bg-green">{action.get("label", "✅")}</span>'
-                        if action.get("detail"):
-                            _detail_html = f'<br><span style="font-size:0.78rem; color:#1565c0;">📋 {action["detail"]}</span>'
-                        if action.get("memo"):
-                            _memo_html = f'<br><span style="font-size:0.72rem; color:#888;">💬 {action["memo"]}</span>'
-
-                    st.markdown(f"""
-                    <div class="task-row done-row" style="border-left: 4px solid #a5d6a7;">
-                        <span class="tr-icon">{_done_icon}</span>
-                        <div class="tr-body">
-                            <div class="tr-name">{p_name} {_action_badge}</div>
-                            <div class="tr-detail">{done_at} 완료{_detail_html}{_memo_html}</div>
-                        </div>
-                    </div>
-                    """, unsafe_allow_html=True)
-
-        # ── ⑦ 새 업무 추가 폼 ──
+        # ── ⑥ 새 업무 추가 폼 ──
         st.markdown("---")
         st.markdown("**\u2795 새 업무 추가**")
         with st.form("add_task_form", clear_on_submit=True):
@@ -4277,6 +4262,52 @@ elif current_page == "daily_log":
                 st.rerun()
             elif add_submitted:
                 st.warning("업무 제목을 입력해주세요.")
+
+    # ════════════════════════════════════════════
+    # Tab: 대응 로그
+    # ════════════════════════════════════════════
+    with tab_log:
+        _action_tasks = [t for t in today_tasks if t.get("action")]
+        if _action_tasks:
+            # 대응 로그 KPI
+            _log_total = len(_action_tasks)
+            _log_types = {}
+            for _lt in _action_tasks:
+                _la = _lt.get("action", {})
+                _llbl = _la.get("label", "✅")
+                _log_types[_llbl] = _log_types.get(_llbl, 0) + 1
+            _log_type_summary = " · ".join(f"{k} {v}건" for k, v in _log_types.items())
+
+            st.markdown(f"""
+            <div style="background:linear-gradient(135deg,#e8f5e9,#f1f8e9); border-radius:12px; padding:1rem 1.2rem; margin-bottom:1rem;">
+                <div style="font-size:1.1rem; font-weight:700; color:#2e7d32;">📊 오늘 대응 로그</div>
+                <div style="font-size:0.9rem; color:#558b2f; margin-top:0.3rem;">총 {_log_total}건 완료 — {_log_type_summary}</div>
+            </div>
+            """, unsafe_allow_html=True)
+
+            _log_html = ""
+            for t in sorted(_action_tasks, key=lambda x: x.get("done_at", ""), reverse=True):
+                _a = t.get("action", {})
+                _time = _a.get("time", t.get("done_at", "")[-5:])
+                _type_lbl = _a.get("label", "✅")
+                _pname = t.get("meta", {}).get("product_name", t.get("title", ""))
+                _detail = _a.get("detail", "")
+                _memo = _a.get("memo", "")
+                _detail_html = f'<div style="font-size:0.82rem; color:#1565c0; margin-top:2px;">📋 {_detail}</div>' if _detail else ""
+                _memo_html = f'<div style="font-size:0.78rem; color:#888; margin-top:1px;">💬 {_memo}</div>' if _memo else ""
+                _log_html += f"""
+                <div style="padding:0.6rem 0.8rem; border-bottom:1px solid #eee;">
+                    <div style="display:flex; align-items:center; gap:0.5rem;">
+                        <span style="font-size:0.78rem; color:#999; width:45px; flex-shrink:0;">{_time}</span>
+                        <span style="font-size:0.88rem; font-weight:600; width:130px; flex-shrink:0;">{_type_lbl}</span>
+                        <span style="font-size:0.88rem; flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">{_pname}</span>
+                    </div>
+                    {_detail_html}
+                    {_memo_html}
+                </div>"""
+            st.markdown(f'<div style="background:#fafafa; border-radius:10px; overflow:hidden;">{_log_html}</div>', unsafe_allow_html=True)
+        else:
+            st.info("아직 오늘 대응 완료된 업무가 없습니다. 업무를 처리하면 여기에 로그가 표시됩니다.")
 
     # ════════════════════════════════════════════
     # Tab 2: 주간/월간 계획
