@@ -637,7 +637,8 @@ def _gist_restore_all():
 
 
 def _gist_backup(filepath):
-    """파일 변경 시 GitHub Gist에 백업 (비동기)."""
+    """파일 변경 시 GitHub Gist에 백업 (백그라운드 스레드)."""
+    import threading
     cfg = _get_gist_config()
     if not cfg:
         return
@@ -645,14 +646,21 @@ def _gist_backup(filepath):
     try:
         with open(filepath, "r", encoding="utf-8") as f:
             content = f.read()
-        requests.patch(
-            f"https://api.github.com/gists/{cfg['gist_id']}",
-            headers={"Authorization": f"token {cfg['token']}"},
-            json={"files": {fname: {"content": content}}},
-            timeout=10,
-        )
     except Exception:
-        pass
+        return
+
+    def _upload():
+        try:
+            requests.patch(
+                f"https://api.github.com/gists/{cfg['gist_id']}",
+                headers={"Authorization": f"token {cfg['token']}"},
+                json={"files": {fname: {"content": content}}},
+                timeout=10,
+            )
+        except Exception:
+            pass
+
+    threading.Thread(target=_upload, daemon=True).start()
 
 
 # ─────────────────────────────────────────────
@@ -857,12 +865,7 @@ def call_onewms_api(func_name: str, params: dict = None) -> dict:
     try:
         resp = requests.get(keys["api_url"], params=payload, timeout=15)
         resp.raise_for_status()
-        result = resp.json()
-        # 디버그: API 응답 구조 확인용 (st.session_state에 저장)
-        if "onewms_debug" not in st.session_state:
-            st.session_state["onewms_debug"] = {}
-        st.session_state["onewms_debug"][func_name] = result
-        return result
+        return resp.json()
     except requests.RequestException as e:
         return {"error": str(e)}
 
@@ -931,7 +934,7 @@ def fetch_yesterday_sales() -> dict:
     }
 
 
-@st.cache_data(ttl=600, show_spinner=False)
+@st.cache_data(ttl=1800, show_spinner=False)
 def fetch_product_names() -> dict:
     """OneWMS API로 상품 ID → 상품명 매핑을 가져옵니다."""
     keys = get_onewms_keys()
@@ -956,7 +959,7 @@ def fetch_product_names() -> dict:
     return name_map
 
 
-@st.cache_data(ttl=600, show_spinner=False)
+@st.cache_data(ttl=1800, show_spinner=False)
 def fetch_current_inventory() -> dict:
     """OneWMS API(get_stock_tx_info)로 현재 재고 데이터를 조회합니다."""
     keys = get_onewms_keys()
@@ -1009,7 +1012,7 @@ def fetch_current_inventory() -> dict:
 # ─────────────────────────────────────────────
 # 2-1. 판매 인사이트 분석 (판매 대응 필요 상품 감지)
 # ─────────────────────────────────────────────
-@st.cache_data(ttl=600, show_spinner=False)
+@st.cache_data(ttl=1800, show_spinner=False)
 def fetch_sales_insight() -> dict:
     """최근 5영업일 출고 패턴 분석 → 이상 징후 감지."""
     from collections import defaultdict
@@ -3807,7 +3810,7 @@ elif current_page == "daily_log":
     def save_notes():
         save_json(STICKY_FILE, {"notes": all_notes})
 
-    def add_task(title, task_type="daily", priority="normal", due=None, auto=False, writer="MD", meta=None):
+    def add_task(title, task_type="daily", priority="normal", due=None, auto=False, writer="MD", meta=None, _skip_save=False):
         if due is None:
             due = today_str
         new_task = {
@@ -3825,7 +3828,8 @@ elif current_page == "daily_log":
         if meta:
             new_task["meta"] = meta
         all_tasks.append(new_task)
-        save_tasks()
+        if not _skip_save:
+            save_tasks()
         return new_task
 
     def toggle_task(task_id, done_value):
@@ -3889,9 +3893,10 @@ elif current_page == "daily_log":
         if _sync_changed:
             save_tasks()
 
-        # 신규 자동태스크 생성 (긴급 대응 + 추가 확인)
+        # 신규 자동태스크 생성 (긴급 대응 + 추가 확인) — 배치 저장
         existing_auto_pids = {t.get("meta", {}).get("product_id") for t in all_tasks if t.get("auto") and t["due"] == today_str and t.get("meta")}
         _combined = [(a, "urgent") for a in anomalies] + [(w, "watch") for w in _watchlist_log]
+        _auto_added = 0
         for item, level in _combined:
             pid = item.get("product_id", "")
             if pid in existing_auto_pids:
@@ -3906,6 +3911,7 @@ elif current_page == "daily_log":
             add_task(
                 auto_title, task_type="daily", priority=level,
                 due=today_str, auto=True, writer="MD",
+                _skip_save=True,
                 meta={
                     "product_id": pid,
                     "product_name": pname,
@@ -3917,16 +3923,23 @@ elif current_page == "daily_log":
                     "reason": f"최근 {total_days}일 중 {active_days}일 출고(일평균 {avg_qty}개) → 오늘 미출고",
                 },
             )
+            _auto_added += 1
+        if _auto_added:
+            save_tasks()
 
-    # ── 어제 미완료 이월 ──
+    # ── 어제 미완료 이월 — 배치 저장 ──
     yesterday_incomplete = [t for t in all_tasks if t.get("due") == yesterday_str and not t.get("done")]
     carried_ids = set()
     existing_today_titles = {t["title"] for t in all_tasks if t.get("due") == today_str}
+    _carry_added = 0
     for t in yesterday_incomplete:
         carry_title = t["title"]
         if carry_title not in existing_today_titles:
-            new_t = add_task(carry_title, task_type=t.get("type", "daily"), priority=t.get("priority", "normal"), due=today_str, writer=t.get("writer", "MD"))
+            new_t = add_task(carry_title, task_type=t.get("type", "daily"), priority=t.get("priority", "normal"), due=today_str, writer=t.get("writer", "MD"), _skip_save=True)
             carried_ids.add(new_t["id"])
+            _carry_added += 1
+    if _carry_added:
+        save_tasks()
 
     # 오늘 업무 필터
     today_tasks = [t for t in all_tasks if t.get("due") == today_str]
