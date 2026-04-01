@@ -2462,9 +2462,9 @@ def show_detail_analysis(data: dict, all_df):
         st.markdown("**💡 가격 앵커링 적용**")
         for item in cta["anchoring"]["items"]:
             st.markdown(f"""
-            <div style="padding:0.4rem 0.6rem; margin-bottom:0.25rem; border-radius:6px; background:#fffbeb; border-left:3px solid #f59e0b;">
-                <span style="font-weight:700; font-size:0.78rem;">{item['type']}</span>
-                <span style="font-size:0.75rem; color:#475569;"> — {item['action']}</span>
+            <div style="padding:0.5rem 0.7rem; margin-bottom:0.3rem; border-radius:8px; background:#fffbeb; border-left:4px solid #f59e0b;">
+                <span style="font-weight:700; font-size:0.9rem;">{item['type']}</span>
+                <span style="font-size:0.85rem; color:#475569;"> — {item['action']}</span>
             </div>
             """, unsafe_allow_html=True)
 
@@ -2534,20 +2534,20 @@ def show_detail_analysis(data: dict, all_df):
             if issues:
                 for issue in issues:
                     st.markdown(f"""
-                    <div style="padding:0.4rem 0.6rem; margin-bottom:0.25rem; border-radius:6px; background:#fef2f2; border-left:3px solid #ef4444;">
-                        <span style="font-size:0.55rem; font-weight:700; color:#fff; background:#ef4444; padding:1px 4px; border-radius:3px;">수정</span>
-                        <span style="font-size:0.78rem; font-weight:600;"> {issue}</span>
+                    <div style="padding:0.5rem 0.7rem; margin-bottom:0.3rem; border-radius:8px; background:#fef2f2; border-left:4px solid #ef4444;">
+                        <span style="font-size:0.65rem; font-weight:700; color:#fff; background:#ef4444; padding:2px 6px; border-radius:4px;">수정</span>
+                        <span style="font-size:0.88rem; font-weight:600;"> {issue}</span>
                     </div>
                     """, unsafe_allow_html=True)
             if found_specs:
-                specs_html = " ".join([f"<span style='display:inline-block; padding:1px 5px; margin:1px; border-radius:4px; background:#f0fdf4; color:#16a34a; font-size:0.7rem; border:1px solid #bbf7d0;'>✅ {s}</span>" for s in found_specs])
+                specs_html = " ".join([f"<span style='display:inline-block; padding:2px 7px; margin:2px; border-radius:4px; background:#f0fdf4; color:#16a34a; font-size:0.82rem; border:1px solid #bbf7d0;'>✅ {s}</span>" for s in found_specs])
                 st.markdown(f"<div style='margin:0.3rem 0;'>{specs_html}</div>", unsafe_allow_html=True)
             if suggestions:
                 for sug in suggestions[:4]:
                     st.markdown(f"""
-                    <div style="padding:0.35rem 0.6rem; margin-bottom:0.2rem; border-radius:6px; background:#fffbeb; border-left:3px solid #f59e0b;">
-                        <span style="font-size:0.55rem; font-weight:700; color:#fff; background:#f59e0b; padding:1px 4px; border-radius:3px;">권장</span>
-                        <span style="font-size:0.75rem;"> {sug}</span>
+                    <div style="padding:0.45rem 0.7rem; margin-bottom:0.25rem; border-radius:8px; background:#fffbeb; border-left:4px solid #f59e0b;">
+                        <span style="font-size:0.65rem; font-weight:700; color:#fff; background:#f59e0b; padding:2px 6px; border-radius:4px;">권장</span>
+                        <span style="font-size:0.85rem;"> {sug}</span>
                     </div>
                     """, unsafe_allow_html=True)
                 if len(suggestions) > 4:
@@ -2561,16 +2561,16 @@ def show_detail_analysis(data: dict, all_df):
                 st.image(our_image, width=110)
             for issue in thumb_analysis.get("issues", []):
                 st.markdown(f"""
-                <div style="padding:0.35rem 0.6rem; margin-bottom:0.2rem; border-radius:6px; background:#fef2f2; border-left:3px solid #ef4444;">
-                    <span style="font-size:0.55rem; font-weight:700; color:#fff; background:#ef4444; padding:1px 4px; border-radius:3px;">수정</span>
-                    <span style="font-size:0.75rem;"> {issue}</span>
+                <div style="padding:0.45rem 0.7rem; margin-bottom:0.25rem; border-radius:8px; background:#fef2f2; border-left:4px solid #ef4444;">
+                    <span style="font-size:0.65rem; font-weight:700; color:#fff; background:#ef4444; padding:2px 6px; border-radius:4px;">수정</span>
+                    <span style="font-size:0.85rem;"> {issue}</span>
                 </div>
                 """, unsafe_allow_html=True)
             for sug in thumb_analysis.get("suggestions", []):
                 st.markdown(f"""
-                <div style="padding:0.35rem 0.6rem; margin-bottom:0.2rem; border-radius:6px; background:#fffbeb; border-left:3px solid #f59e0b;">
-                    <span style="font-size:0.55rem; font-weight:700; color:#fff; background:#f59e0b; padding:1px 4px; border-radius:3px;">권장</span>
-                    <span style="font-size:0.75rem;"> {sug}</span>
+                <div style="padding:0.45rem 0.7rem; margin-bottom:0.25rem; border-radius:8px; background:#fffbeb; border-left:4px solid #f59e0b;">
+                    <span style="font-size:0.65rem; font-weight:700; color:#fff; background:#f59e0b; padding:2px 6px; border-radius:4px;">권장</span>
+                    <span style="font-size:0.85rem;"> {sug}</span>
                 </div>
                 """, unsafe_allow_html=True)
 
@@ -2581,8 +2581,8 @@ def show_detail_analysis(data: dict, all_df):
             for i, tip in enumerate(diff_tips):
                 with dt_cols[i % len(dt_cols)]:
                     st.markdown(f"""
-                    <div style="padding:0.4rem 0.6rem; border-radius:6px; background:linear-gradient(135deg, #eff6ff, #f0f9ff); border:1px solid #bfdbfe;">
-                        <div style="font-size:0.75rem; color:#1e40af;">💎 {tip}</div>
+                    <div style="padding:0.5rem 0.7rem; border-radius:8px; background:linear-gradient(135deg, #eff6ff, #f0f9ff); border:1px solid #bfdbfe;">
+                        <div style="font-size:0.88rem; color:#1e40af;">💎 {tip}</div>
                     </div>
                     """, unsafe_allow_html=True)
 
@@ -2674,10 +2674,10 @@ def show_detail_analysis(data: dict, all_df):
         # 렌더링
         for idx, (pri, color, text) in enumerate(_checklist):
             st.markdown(f"""
-            <div style="display:flex; align-items:center; gap:0.5rem; padding:0.4rem 0.6rem; margin-bottom:0.2rem; border-radius:6px; background:#fff; border:1px solid #f0f0f0; border-left:3px solid {color};">
-                <span style="font-size:0.85rem; color:#ccc;">☐</span>
-                <span style="font-size:0.55rem; font-weight:700; color:#fff; background:{color}; padding:1px 5px; border-radius:3px; flex-shrink:0;">{pri}</span>
-                <span style="font-size:0.78rem; color:#333;">{text}</span>
+            <div style="display:flex; align-items:center; gap:0.6rem; padding:0.5rem 0.8rem; margin-bottom:0.3rem; border-radius:8px; background:#fff; border:1px solid #f0f0f0; border-left:4px solid {color};">
+                <span style="font-size:1rem; color:#ccc;">☐</span>
+                <span style="font-size:0.68rem; font-weight:700; color:#fff; background:{color}; padding:2px 7px; border-radius:4px; flex-shrink:0;">{pri}</span>
+                <span style="font-size:0.9rem; color:#333;">{text}</span>
             </div>
             """, unsafe_allow_html=True)
 
@@ -2689,17 +2689,25 @@ def show_detail_analysis(data: dict, all_df):
                 ("cart_abandon", "이탈 방지", "🛒", "#f59e0b", "#fffbeb"),
                 ("cta_button", "CTA 버튼", "🔘", "#06b6d4", "#ecfeff"),
             ]
-            for section_key, section_title, section_icon, accent, bg in _cta_sections:
-                st.markdown(f"**{section_icon} {section_title}**")
-                for item in cta[section_key]["items"]:
-                    example = item.get("example", "")
-                    st.markdown(f"""
-                    <div style="padding:0.35rem 0.6rem; margin:0.15rem 0 0.15rem 0.5rem; border-radius:6px; background:{bg}; border-left:2px solid {accent};">
-                        <div style="font-size:0.75rem; font-weight:600; color:#334155;">{item.get('type','')}</div>
-                        <div style="font-size:0.72rem; color:#475569;">{item['action']}</div>
-                        {f'<div style="font-size:0.68rem; color:#666; margin-top:2px;">✍️ {example}</div>' if example else ''}
-                    </div>
-                    """, unsafe_allow_html=True)
+            # 2x2 그리드 배치
+            for row_i in range(0, len(_cta_sections), 2):
+                _grid = st.columns(2)
+                for col_i in range(2):
+                    si = row_i + col_i
+                    if si >= len(_cta_sections):
+                        break
+                    section_key, section_title, section_icon, accent, bg = _cta_sections[si]
+                    with _grid[col_i]:
+                        st.markdown(f"**{section_icon} {section_title}**")
+                        for item in cta[section_key]["items"]:
+                            example = item.get("example", "")
+                            st.markdown(f"""
+                            <div style="padding:0.45rem 0.7rem; margin:0.2rem 0; border-radius:8px; background:{bg}; border-left:3px solid {accent};">
+                                <div style="font-size:0.88rem; font-weight:700; color:#334155;">{item.get('type','')}</div>
+                                <div style="font-size:0.82rem; color:#475569; margin-top:2px;">{item['action']}</div>
+                                {f'<div style="font-size:0.78rem; color:#555; margin-top:3px;">✍️ {example}</div>' if example else ''}
+                            </div>
+                            """, unsafe_allow_html=True)
 
 
 
