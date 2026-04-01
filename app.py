@@ -2183,30 +2183,36 @@ def show_detail_analysis(data: dict, all_df):
     review_summary = analyze_blog_reviews(blog_reviews) if blog_reviews else {"pros": [], "cons": [], "count": 0}
     cta = analyze_cta_strategy(our_price, our_name, our_rank, price_analysis, title_analysis, detail_data_extra, all_df)
 
-    # ════════════════════════════════════════
-    # SECTION 1: 상품 헤더 + 점수 인라인 (한 줄로)
-    # ════════════════════════════════════════
+    # ── 공통 변수 ──
+    category = title_analysis.get("category", "일반")
+    our_unit = price_analysis.get("우리_개당가격", 0)
+    our_qty = price_analysis.get("우리_수량", 0)
+    comps = price_analysis.get("경쟁사", [])
+    issues = title_analysis.get("issues", [])
+    suggestions = title_analysis.get("suggestions", [])
+    found_specs = title_analysis.get("found_specs", [])
+    diff_tips = title_analysis.get("diff_tips", [])
 
-    # 점수 계산 (먼저)
+    # ════════════════════════════════════════
+    # SECTION 1: 상품 헤더 + 점수 배지
+    # ════════════════════════════════════════
     scores = {}
-    if price_analysis.get("우리_개당가격") and price_analysis.get("경쟁사"):
-        cheapest = price_analysis["경쟁사"][0]
-        if price_analysis["우리_개당가격"] <= cheapest["개당가격"]:
-            scores["가격"] = {"s": "우위", "c": "#22c55e", "d": f"{price_analysis['우리_개당가격']:,}원"}
-        elif price_analysis["우리_개당가격"] <= cheapest["개당가격"] * 1.1:
-            scores["가격"] = {"s": "보통", "c": "#f59e0b", "d": f"{price_analysis['우리_개당가격']:,}원"}
+    if our_unit and comps:
+        cheapest = comps[0]
+        if our_unit <= cheapest["개당가격"]:
+            scores["가격"] = {"s": "우위", "c": "#22c55e", "d": f"{our_unit:,}원"}
+        elif our_unit <= cheapest["개당가격"] * 1.1:
+            scores["가격"] = {"s": "보통", "c": "#f59e0b", "d": f"{our_unit:,}원"}
         else:
-            diff_pct = round((price_analysis["우리_개당가격"] / cheapest["개당가격"] - 1) * 100)
+            diff_pct = round((our_unit / cheapest["개당가격"] - 1) * 100)
             scores["가격"] = {"s": "주의", "c": "#ef4444", "d": f"+{diff_pct}%"}
     else:
         scores["가격"] = {"s": "-", "c": "#94a3b8", "d": "분석불가"}
 
-    issues_count = len(title_analysis.get("issues", []))
-    sug_count = len(title_analysis.get("suggestions", []))
-    if issues_count > 0:
-        scores["상품명"] = {"s": "수정", "c": "#ef4444", "d": f"{issues_count}건"}
-    elif sug_count > 2:
-        scores["상품명"] = {"s": "개선", "c": "#f59e0b", "d": f"{sug_count}건"}
+    if len(issues) > 0:
+        scores["상품명"] = {"s": "수정", "c": "#ef4444", "d": f"{len(issues)}건"}
+    elif len(suggestions) > 2:
+        scores["상품명"] = {"s": "개선", "c": "#f59e0b", "d": f"{len(suggestions)}건"}
     else:
         scores["상품명"] = {"s": "양호", "c": "#22c55e", "d": "OK"}
 
@@ -2222,12 +2228,10 @@ def show_detail_analysis(data: dict, all_df):
     else:
         scores["순위"] = {"s": "하위", "c": "#ef4444", "d": f"{our_rank}위"}
 
-    # 점수 배지 HTML (인라인)
     score_badges = ""
     for label, info in scores.items():
         score_badges += f'<div style="text-align:center; min-width:52px;"><div style="width:10px; height:10px; border-radius:50%; background:{info["c"]}; margin:0 auto 2px;"></div><div style="font-size:0.58rem; color:#94a3b8;">{label}</div><div style="font-size:0.68rem; font-weight:700;">{info["s"]}</div><div style="font-size:0.55rem; color:#94a3b8;">{info["d"]}</div></div>'
 
-    # 헤더 + 점수 한 줄
     img_html = f'<img src="{our_image}" style="width:50px; height:50px; border-radius:6px; object-fit:cover;">' if our_image else ''
     link_html = f' · <a href="{our_link}" target="_blank" style="font-size:0.7rem; color:#3b82f6;">상품페이지↗</a>' if our_link and our_link != "#" else ''
 
@@ -2244,87 +2248,202 @@ def show_detail_analysis(data: dict, all_df):
     </div>
     """, unsafe_allow_html=True)
 
-    st.divider()
-
     # ════════════════════════════════════════
-    # SECTION 2: TOP 액션 (2열 그리드)
+    # SECTION 2: 💸 매출 손실 추정 카드
     # ════════════════════════════════════════
-    st.markdown("##### 🚀 지금 바로 해야 할 일")
+    if our_unit and comps:
+        cheapest = comps[0]
+        unit_diff = our_unit - cheapest["개당가격"]
+        if unit_diff > 0:
+            # 업무일지에서 일평균 출고량 가져오기 시도
+            _avg_qty_est = 0
+            try:
+                _insight = fetch_sales_insight()
+                for _anom in _insight.get("anomalies", []) + _insight.get("watchlist", []):
+                    if our_name and _anom.get("product_id", "") in our_name:
+                        _avg_qty_est = _anom.get("avg_qty", 0)
+                        break
+            except Exception:
+                pass
+            _daily_qty = _avg_qty_est if _avg_qty_est > 0 else 10  # 기본 추정 10개/일
+            _daily_loss = unit_diff * _daily_qty
+            _monthly_loss = _daily_loss * 30
+            _recommend_price = cheapest["개당가격"] * 1.1  # 최저가 대비 +10%
+            _recommend_total = round(_recommend_price * our_qty) if our_qty else our_price
+            _diff_pct = round((our_unit / cheapest["개당가격"] - 1) * 100)
 
-    top_actions = []
-
-    # 긴급 액션
-    if scores.get("가격", {}).get("c") == "#ef4444" and price_analysis.get("경쟁사"):
-        cheapest = price_analysis["경쟁사"][0]
-        top_actions.append({
-            "priority": "긴급", "bg": "#fff5f5", "border": "#f5576c",
-            "title": "💰 가격 경쟁력 확보",
-            "action": f"개당 {price_analysis['우리_개당가격']:,}원 → {cheapest['개당가격']:,}원 이하",
-        })
-    if title_analysis.get("issues"):
-        top_actions.append({
-            "priority": "긴급", "bg": "#fff5f5", "border": "#f5576c",
-            "title": "📝 상품명 SEO 수정",
-            "action": " / ".join(title_analysis["issues"][:2])[:60],
-        })
-
-    # 중요 액션
-    top_actions.append({
-        "priority": "중요", "bg": "#fffbeb", "border": "#f59e0b",
-        "title": "🏷️ 가격 앵커링 적용",
-        "action": "원가 취소선 + 할인가 + 개당단가 상단 배치",
-    })
-    top_actions.append({
-        "priority": "중요", "bg": "#fffbeb", "border": "#f59e0b",
-        "title": "👥 사회적 증거 배지",
-        "action": "판매량·리뷰·인증 배지를 상단에 배치",
-    })
-
-    # 권장 액션
-    top_actions.append({
-        "priority": "권장", "bg": "#f0fdf4", "border": "#22c55e",
-        "title": "⏰ FOMO 요소 적용",
-        "action": "당일출고 마감·재고임박·한정 프로모션",
-    })
-    top_actions.append({
-        "priority": "권장", "bg": "#f0fdf4", "border": "#22c55e",
-        "title": "🔘 CTA 버튼 최적화",
-        "action": "혜택 포함 문구 + 중간·하단 반복 배치",
-    })
-
-    # 2열 그리드로 렌더링
-    _act_cols = st.columns(2)
-    for i, act in enumerate(top_actions):
-        with _act_cols[i % 2]:
             st.markdown(f"""
-            <div style="padding:0.45rem 0.7rem; margin-bottom:0.35rem; border-radius:6px; background:{act['bg']}; border-left:3px solid {act['border']};">
-                <div style="display:flex; align-items:center; gap:0.3rem;">
-                    <span style="font-size:0.55rem; font-weight:700; color:#fff; background:{act['border']}; padding:0.08rem 0.3rem; border-radius:3px;">{act['priority']}</span>
-                    <span style="font-weight:700; font-size:0.78rem;">{act['title']}</span>
+            <div style="background: linear-gradient(135deg, #fef2f2, #fff5f5); border: 1px solid #fecaca; border-radius: 12px; padding: 0.8rem 1rem; margin: 0.5rem 0;">
+                <div style="display:flex; align-items:center; gap:0.5rem; margin-bottom:0.5rem;">
+                    <span style="font-size:1.1rem;">💸</span>
+                    <span style="font-size:0.9rem; font-weight:800; color:#dc2626;">예상 매출 손실</span>
+                    <span style="font-size:0.68rem; color:#999; margin-left:auto;">일평균 {_daily_qty}개 기준</span>
                 </div>
-                <div style="margin-top:0.15rem; font-size:0.72rem; color:#475569;">{act['action']}</div>
+                <div style="display:flex; gap:1rem; flex-wrap:wrap;">
+                    <div style="flex:1; min-width:120px;">
+                        <div style="font-size:0.68rem; color:#888;">우리 개당가격</div>
+                        <div style="font-size:1rem; font-weight:700; color:#dc2626;">{our_unit:,}원</div>
+                    </div>
+                    <div style="flex:1; min-width:120px;">
+                        <div style="font-size:0.68rem; color:#888;">최저가 (개당)</div>
+                        <div style="font-size:1rem; font-weight:700; color:#16a34a;">{cheapest['개당가격']:,}원</div>
+                    </div>
+                    <div style="flex:1; min-width:120px;">
+                        <div style="font-size:0.68rem; color:#888;">차이</div>
+                        <div style="font-size:1rem; font-weight:700; color:#dc2626;">+{unit_diff:,}원 (+{_diff_pct}%)</div>
+                    </div>
+                </div>
+                <div style="margin-top:0.6rem; padding-top:0.5rem; border-top:1px solid #fecaca; display:flex; gap:1rem; flex-wrap:wrap;">
+                    <div style="flex:1; text-align:center; padding:0.4rem; background:#fff; border-radius:8px;">
+                        <div style="font-size:0.68rem; color:#888;">일 손실</div>
+                        <div style="font-size:1.1rem; font-weight:800; color:#dc2626;">-{_daily_loss:,}원</div>
+                    </div>
+                    <div style="flex:1; text-align:center; padding:0.4rem; background:#fff; border-radius:8px;">
+                        <div style="font-size:0.68rem; color:#888;">월 손실 추정</div>
+                        <div style="font-size:1.1rem; font-weight:800; color:#dc2626;">-{_monthly_loss:,}원</div>
+                    </div>
+                    <div style="flex:1; text-align:center; padding:0.4rem; background:#f0fdf4; border-radius:8px; border:1px solid #bbf7d0;">
+                        <div style="font-size:0.68rem; color:#888;">🎯 권장 가격</div>
+                        <div style="font-size:1.1rem; font-weight:800; color:#16a34a;">{_recommend_total:,}원</div>
+                        <div style="font-size:0.6rem; color:#888;">최저가+10%</div>
+                    </div>
+                </div>
+            </div>
+            """, unsafe_allow_html=True)
+        elif unit_diff <= 0:
+            _save_pct = round((1 - our_unit / cheapest["개당가격"]) * 100) if cheapest["개당가격"] > 0 else 0
+            st.markdown(f"""
+            <div style="background: linear-gradient(135deg, #f0fdf4, #ecfdf5); border: 1px solid #bbf7d0; border-radius: 12px; padding: 0.7rem 1rem; margin: 0.5rem 0;">
+                <span style="font-size:1rem;">✅</span>
+                <span style="font-size:0.88rem; font-weight:700; color:#16a34a;"> 가격 경쟁력 확보됨</span>
+                <span style="font-size:0.78rem; color:#555;"> — 최저가 대비 {_save_pct}% 저렴 (개당 {our_unit:,}원 vs {cheapest['개당가격']:,}원)</span>
             </div>
             """, unsafe_allow_html=True)
 
+    st.divider()
+
     # ════════════════════════════════════════
-    # SECTION 4: 상세 분석 탭
+    # SECTION 3: 동적 TOP 액션 (상품별 맞춤)
+    # ════════════════════════════════════════
+    st.markdown("##### 🚀 지금 바로 해야 할 일")
+    top_actions = []
+
+    # 긴급 — 가격이 비쌀 때만
+    if scores.get("가격", {}).get("c") == "#ef4444" and comps:
+        cheapest = comps[0]
+        _rec_unit = round(cheapest["개당가격"] * 1.1)
+        _rec_total = round(_rec_unit * our_qty) if our_qty else our_price
+        top_actions.append({
+            "priority": "긴급", "bg": "#fff5f5", "border": "#f5576c",
+            "title": "💰 가격 인하",
+            "action": f"{our_price:,}원 → {_rec_total:,}원 (개당 {our_unit:,}→{_rec_unit:,}원)",
+        })
+
+    # 긴급 — 상품명 이슈
+    if issues:
+        top_actions.append({
+            "priority": "긴급", "bg": "#fff5f5", "border": "#f5576c",
+            "title": "📝 상품명 수정",
+            "action": " / ".join(issues[:2])[:60],
+        })
+
+    # 긴급 — 순위 하위
+    if our_rank > 30:
+        top_actions.append({
+            "priority": "긴급", "bg": "#fff5f5", "border": "#f5576c",
+            "title": "📉 순위 개선 필요",
+            "action": f"현재 {our_rank}위 — 광고 집행 또는 가격/상품명 개선 시급",
+        })
+
+    # 중요 — 개당단가 앵커링 (항상 유용하지만 가격 데이터 있을 때만)
+    if our_unit and our_qty:
+        top_actions.append({
+            "priority": "중요", "bg": "#fffbeb", "border": "#f59e0b",
+            "title": "🏷️ 개당 단가 강조",
+            "action": f"썸네일·상세페이지에 '개당 {our_unit:,}원' 텍스트 삽입",
+        })
+
+    # 중요 — 썸네일 이슈
+    if thumb_analysis.get("issues"):
+        top_actions.append({
+            "priority": "중요", "bg": "#fffbeb", "border": "#f59e0b",
+            "title": "📸 썸네일 개선",
+            "action": thumb_analysis["issues"][0][:50],
+        })
+
+    # 권장 — 상품명 개선안이 많을 때
+    if len(suggestions) > 2:
+        top_actions.append({
+            "priority": "권장", "bg": "#f0fdf4", "border": "#22c55e",
+            "title": "📝 상품명 키워드 보강",
+            "action": f"{len(suggestions)}개 개선 항목 — 상품명·페이지 탭에서 확인",
+        })
+
+    if not top_actions:
+        st.success("✅ 현재 긴급하게 수정할 사항이 없습니다. 아래 탭에서 세부 분석을 확인하세요.")
+    else:
+        # 2열 그리드
+        _act_cols = st.columns(2)
+        for i, act in enumerate(top_actions[:6]):
+            with _act_cols[i % 2]:
+                st.markdown(f"""
+                <div style="padding:0.45rem 0.7rem; margin-bottom:0.35rem; border-radius:6px; background:{act['bg']}; border-left:3px solid {act['border']};">
+                    <div style="display:flex; align-items:center; gap:0.3rem;">
+                        <span style="font-size:0.55rem; font-weight:700; color:#fff; background:{act['border']}; padding:0.08rem 0.3rem; border-radius:3px;">{act['priority']}</span>
+                        <span style="font-weight:700; font-size:0.78rem;">{act['title']}</span>
+                    </div>
+                    <div style="margin-top:0.15rem; font-size:0.72rem; color:#475569;">{act['action']}</div>
+                </div>
+                """, unsafe_allow_html=True)
+
+    # ════════════════════════════════════════
+    # SECTION 4: 상세 분석 3탭
     # ════════════════════════════════════════
     st.markdown("")
     st.markdown("#### 📋 상세 분석")
 
-    tab_price, tab_product, tab_cta, tab_review = st.tabs([
-        "💰 가격 분석", "📝 상품명·썸네일", "🎯 CTA 전략", "💬 리뷰"
+    tab_price, tab_product, tab_action = st.tabs([
+        "💰 가격·경쟁력", "📝 상품명·페이지", "📊 종합 액션플랜"
     ])
 
-    # ── 탭 1: 가격 분석 ──
+    # ── 탭 1: 가격·경쟁력 ──
     with tab_price:
-        if price_analysis.get("우리_개당가격"):
-            our_unit = price_analysis["우리_개당가격"]
-            our_qty = price_analysis["우리_수량"]
-            st.metric("우리 개당 단가", f"{our_unit:,}원", f"{our_price:,}원 ÷ {our_qty}개")
+        if our_unit:
+            # ── 가격 바 차트 (비주얼 비교) ──
+            st.markdown("##### 📊 경쟁사 개당가격 비교")
+            _bar_items = [{"판매처": f"🏪 우리 ({our_mall})", "개당가격": our_unit, "is_ours": True}]
+            for comp in comps[:5]:
+                _bar_items.append({"판매처": f"{comp['순위']}위 {comp['판매처']}", "개당가격": comp["개당가격"], "is_ours": False})
 
-            comps = price_analysis.get("경쟁사", [])
-            if comps:
+            if _bar_items:
+                _sorted_bars = sorted(_bar_items, key=lambda x: x["개당가격"])
+                _max_price = max(b["개당가격"] for b in _sorted_bars) if _sorted_bars else 1
+                _bar_html = ""
+                for b in _sorted_bars:
+                    _pct = round(b["개당가격"] / _max_price * 100)
+                    if b["is_ours"]:
+                        _bar_color = "#dc2626" if our_unit > (comps[0]["개당가격"] if comps else our_unit) else "#16a34a"
+                        _bar_bg = "#fef2f2" if _bar_color == "#dc2626" else "#f0fdf4"
+                        _name_style = "font-weight:800; color:#111;"
+                        _bar_border = f"border:2px solid {_bar_color};"
+                    else:
+                        _bar_color = "#94a3b8"
+                        _bar_bg = "#f8fafc"
+                        _name_style = "color:#555;"
+                        _bar_border = ""
+                    _bar_html += f"""
+                    <div style="display:flex; align-items:center; gap:0.5rem; margin-bottom:0.3rem; padding:0.3rem 0.5rem; border-radius:6px; background:{_bar_bg}; {_bar_border}">
+                        <div style="width:120px; font-size:0.72rem; {_name_style} flex-shrink:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">{b['판매처']}</div>
+                        <div style="flex:1; background:#e5e7eb; border-radius:4px; height:18px; overflow:hidden;">
+                            <div style="width:{_pct}%; height:100%; background:{_bar_color}; border-radius:4px; transition:width 0.5s;"></div>
+                        </div>
+                        <div style="width:65px; text-align:right; font-size:0.78rem; font-weight:700; color:{_bar_color}; flex-shrink:0;">{b['개당가격']:,}원</div>
+                    </div>"""
+                st.markdown(_bar_html, unsafe_allow_html=True)
+
+            st.markdown("")
+            # 상세 테이블 (접힘)
+            with st.expander("📋 상세 가격 테이블", expanded=False):
                 table_rows = [{"구분": "🏪 우리", "판매처": our_mall, "가격": f"{our_price:,}원", "수량": f"{our_qty}개", "개당가격": f"{our_unit:,}원"}]
                 for comp in comps[:4]:
                     table_rows.append({
@@ -2338,166 +2457,249 @@ def show_detail_analysis(data: dict, all_df):
         else:
             st.info("상품명에서 수량 정보를 추출할 수 없어 개당 가격 비교가 어렵습니다.")
 
-        # 앵커링 전략
-        st.markdown("**💡 가격 앵커링 적용 방법**")
+        # 앵커링 전략 (간결화)
+        st.markdown("---")
+        st.markdown("**💡 가격 앵커링 적용**")
         for item in cta["anchoring"]["items"]:
-            st.markdown(f"**{item['type']}** — {item['action']}")
-            st.caption(item["detail"])
+            st.markdown(f"""
+            <div style="padding:0.4rem 0.6rem; margin-bottom:0.25rem; border-radius:6px; background:#fffbeb; border-left:3px solid #f59e0b;">
+                <span style="font-weight:700; font-size:0.78rem;">{item['type']}</span>
+                <span style="font-size:0.75rem; color:#475569;"> — {item['action']}</span>
+            </div>
+            """, unsafe_allow_html=True)
 
-    # ── 탭 2: 상품명·썸네일 ──
+    # ── 탭 2: 상품명·페이지 ──
     with tab_product:
-        category = title_analysis.get("category", "일반")
-        found_specs = title_analysis.get("found_specs", [])
-        issues = title_analysis.get("issues", [])
-        suggestions = title_analysis.get("suggestions", [])
-        diff_tips = title_analysis.get("diff_tips", [])
+        # ── 상품명 Before → After 제안 ──
+        st.markdown("##### ✏️ 상품명 수정 제안")
 
-        # --- 상품명 진단 카드 ---
+        # After 상품명 생성
+        import re as _re2
+        _brand = extract_brand(our_name)
+        _base_name = our_name.replace(f"{_brand}-", "").replace(f"{_brand} ", "").strip()
+        # 카테고리 키워드 추가
+        _cat_keywords = {
+            "면도기": "면도기", "기저귀": "기저귀", "물티슈": "물티슈",
+            "구강용품": "칫솔", "화장품": "화장품", "커터/문구": "커터칼",
+        }
+        _cat_kw = _cat_keywords.get(category, "")
+        _has_cat_kw = _cat_kw.lower() in our_name.lower() if _cat_kw else True
+        # 빠진 스펙 키워드 제안
+        _missing_specs = []
+        for spec_name, spec_info in _CATEGORY_SPECS.get(category, {}).get("missing_advice", {}).items():
+            has_it = any(kw.lower() in our_name.lower() for kw in spec_info["check"])
+            if not has_it and spec_info["check"]:
+                _missing_specs.append(spec_info["check"][0])
+        # After 생성
+        _after_parts = [_brand]
+        _after_parts.append(_base_name)
+        if not _has_cat_kw and _cat_kw:
+            _after_parts.append(_cat_kw)
+        if _missing_specs:
+            _after_parts.extend(_missing_specs[:2])
+        _qty_text = f"{our_qty}개입" if our_qty else ""
+        if _qty_text and _qty_text not in our_name:
+            _after_parts.append(f"({_qty_text})")
+        _after_name = " ".join(_after_parts)
+
+        _changes_html = ""
+        if not _has_cat_kw and _cat_kw:
+            _changes_html += f'<span style="display:inline-block; margin:2px; padding:1px 6px; border-radius:4px; background:#e8f5e9; color:#2e7d32; font-size:0.7rem;">+{_cat_kw}</span>'
+        for _ms in _missing_specs[:2]:
+            _changes_html += f'<span style="display:inline-block; margin:2px; padding:1px 6px; border-radius:4px; background:#e3f2fd; color:#1565c0; font-size:0.7rem;">+{_ms}</span>'
+        if _qty_text and _qty_text not in our_name:
+            _changes_html += f'<span style="display:inline-block; margin:2px; padding:1px 6px; border-radius:4px; background:#fff3e0; color:#e65100; font-size:0.7rem;">+{_qty_text}</span>'
+
+        st.markdown(f"""
+        <div style="background:#f8fafc; border:1px solid #e2e8f0; border-radius:10px; padding:0.8rem 1rem; margin-bottom:0.8rem;">
+            <div style="margin-bottom:0.5rem;">
+                <span style="font-size:0.65rem; font-weight:700; color:#fff; background:#94a3b8; padding:2px 6px; border-radius:3px;">BEFORE</span>
+                <div style="font-size:0.82rem; color:#888; margin-top:4px; text-decoration:line-through;">{our_name}</div>
+            </div>
+            <div style="margin-bottom:0.4rem;">
+                <span style="font-size:0.65rem; font-weight:700; color:#fff; background:#16a34a; padding:2px 6px; border-radius:3px;">AFTER</span>
+                <div style="font-size:0.85rem; color:#111; font-weight:700; margin-top:4px;">{_after_name}</div>
+            </div>
+            <div style="font-size:0.7rem; color:#666;">추가 키워드: {_changes_html if _changes_html else '<span style="color:#16a34a;">— 현재 상품명 양호</span>'}</div>
+        </div>
+        """, unsafe_allow_html=True)
+
+        # ── 카테고리 + 스펙 진단 ──
         if category != "일반":
-            st.markdown(f"<div style='display:inline-block; padding:0.2rem 0.6rem; border-radius:12px; background:#e8f4fd; color:#0369a1; font-size:0.75rem; font-weight:600; margin-bottom:0.5rem;'>📂 카테고리: {category}</div>", unsafe_allow_html=True)
+            st.markdown(f"<div style='display:inline-block; padding:0.2rem 0.6rem; border-radius:12px; background:#e8f4fd; color:#0369a1; font-size:0.75rem; font-weight:600;'>📂 {category}</div>", unsafe_allow_html=True)
 
         p_cols = st.columns(2)
         with p_cols[0]:
-            st.markdown("##### 📝 상품명 진단")
-
-            # 즉시 수정 필요 (빨간 카드)
+            st.markdown("**📝 상품명 진단**")
             if issues:
                 for issue in issues:
                     st.markdown(f"""
-                    <div style="padding:0.6rem 0.8rem; margin-bottom:0.4rem; border-radius:8px; background:#fef2f2; border-left:4px solid #ef4444;">
-                        <div style="display:flex; align-items:center; gap:0.4rem;">
-                            <span style="font-size:0.6rem; font-weight:700; color:#fff; background:#ef4444; padding:0.1rem 0.35rem; border-radius:3px;">즉시수정</span>
-                            <span style="font-size:0.82rem; font-weight:600;">{issue}</span>
-                        </div>
+                    <div style="padding:0.4rem 0.6rem; margin-bottom:0.25rem; border-radius:6px; background:#fef2f2; border-left:3px solid #ef4444;">
+                        <span style="font-size:0.55rem; font-weight:700; color:#fff; background:#ef4444; padding:1px 4px; border-radius:3px;">수정</span>
+                        <span style="font-size:0.78rem; font-weight:600;"> {issue}</span>
                     </div>
                     """, unsafe_allow_html=True)
-
-            # 포함된 스펙 (초록 체크)
             if found_specs:
-                specs_html = " ".join([f"<span style='display:inline-block; padding:0.15rem 0.4rem; margin:0.1rem; border-radius:4px; background:#f0fdf4; color:#16a34a; font-size:0.72rem; border:1px solid #bbf7d0;'>✅ {s}</span>" for s in found_specs])
+                specs_html = " ".join([f"<span style='display:inline-block; padding:1px 5px; margin:1px; border-radius:4px; background:#f0fdf4; color:#16a34a; font-size:0.7rem; border:1px solid #bbf7d0;'>✅ {s}</span>" for s in found_specs])
                 st.markdown(f"<div style='margin:0.3rem 0;'>{specs_html}</div>", unsafe_allow_html=True)
-
-            # 개선 권장 (노란 카드)
             if suggestions:
-                for sug in suggestions:
+                for sug in suggestions[:4]:
                     st.markdown(f"""
-                    <div style="padding:0.5rem 0.8rem; margin-bottom:0.3rem; border-radius:8px; background:#fffbeb; border-left:4px solid #f59e0b;">
-                        <div style="display:flex; align-items:center; gap:0.4rem;">
-                            <span style="font-size:0.6rem; font-weight:700; color:#fff; background:#f59e0b; padding:0.1rem 0.35rem; border-radius:3px;">개선권장</span>
-                            <span style="font-size:0.8rem;">{sug}</span>
-                        </div>
+                    <div style="padding:0.35rem 0.6rem; margin-bottom:0.2rem; border-radius:6px; background:#fffbeb; border-left:3px solid #f59e0b;">
+                        <span style="font-size:0.55rem; font-weight:700; color:#fff; background:#f59e0b; padding:1px 4px; border-radius:3px;">권장</span>
+                        <span style="font-size:0.75rem;"> {sug}</span>
                     </div>
                     """, unsafe_allow_html=True)
-
+                if len(suggestions) > 4:
+                    st.caption(f"...외 {len(suggestions)-4}개 항목")
             if not issues and not suggestions:
-                st.markdown("""
-                <div style="padding:0.6rem 0.8rem; border-radius:8px; background:#f0fdf4; border-left:4px solid #22c55e;">
-                    <span style="font-size:0.85rem; font-weight:600;">✅ 상품명 구성 양호</span>
-                </div>
-                """, unsafe_allow_html=True)
+                st.success("✅ 상품명 구성 양호")
 
         with p_cols[1]:
-            st.markdown("##### 📸 썸네일 진단")
+            st.markdown("**📸 썸네일 진단**")
             if our_image:
-                st.image(our_image, width=120)
-
-            thumb_issues = thumb_analysis.get("issues", [])
-            thumb_sugs = thumb_analysis.get("suggestions", [])
-
-            for issue in thumb_issues:
+                st.image(our_image, width=110)
+            for issue in thumb_analysis.get("issues", []):
                 st.markdown(f"""
-                <div style="padding:0.5rem 0.8rem; margin-bottom:0.3rem; border-radius:8px; background:#fef2f2; border-left:4px solid #ef4444;">
-                    <div style="display:flex; align-items:center; gap:0.4rem;">
-                        <span style="font-size:0.6rem; font-weight:700; color:#fff; background:#ef4444; padding:0.1rem 0.35rem; border-radius:3px;">즉시수정</span>
-                        <span style="font-size:0.8rem;">{issue}</span>
-                    </div>
+                <div style="padding:0.35rem 0.6rem; margin-bottom:0.2rem; border-radius:6px; background:#fef2f2; border-left:3px solid #ef4444;">
+                    <span style="font-size:0.55rem; font-weight:700; color:#fff; background:#ef4444; padding:1px 4px; border-radius:3px;">수정</span>
+                    <span style="font-size:0.75rem;"> {issue}</span>
+                </div>
+                """, unsafe_allow_html=True)
+            for sug in thumb_analysis.get("suggestions", []):
+                st.markdown(f"""
+                <div style="padding:0.35rem 0.6rem; margin-bottom:0.2rem; border-radius:6px; background:#fffbeb; border-left:3px solid #f59e0b;">
+                    <span style="font-size:0.55rem; font-weight:700; color:#fff; background:#f59e0b; padding:1px 4px; border-radius:3px;">권장</span>
+                    <span style="font-size:0.75rem;"> {sug}</span>
                 </div>
                 """, unsafe_allow_html=True)
 
-            for sug in thumb_sugs:
-                st.markdown(f"""
-                <div style="padding:0.5rem 0.8rem; margin-bottom:0.3rem; border-radius:8px; background:#fffbeb; border-left:4px solid #f59e0b;">
-                    <div style="display:flex; align-items:center; gap:0.4rem;">
-                        <span style="font-size:0.6rem; font-weight:700; color:#fff; background:#f59e0b; padding:0.1rem 0.35rem; border-radius:3px;">개선권장</span>
-                        <span style="font-size:0.8rem;">{sug}</span>
-                    </div>
-                </div>
-                """, unsafe_allow_html=True)
-
-        # --- 차별화 전략 (하단 풀와이드) ---
+        # 차별화 전략
         if diff_tips:
-            st.markdown("")
-            st.markdown("##### 🎯 카테고리 맞춤 차별화 전략")
+            st.markdown("**🎯 카테고리 차별화**")
             dt_cols = st.columns(min(len(diff_tips), 3))
             for i, tip in enumerate(diff_tips):
                 with dt_cols[i % len(dt_cols)]:
                     st.markdown(f"""
-                    <div style="padding:0.6rem 0.8rem; border-radius:8px; background:linear-gradient(135deg, #eff6ff, #f0f9ff); border:1px solid #bfdbfe; height:100%;">
-                        <div style="font-size:0.8rem; color:#1e40af;">💎 {tip}</div>
+                    <div style="padding:0.4rem 0.6rem; border-radius:6px; background:linear-gradient(135deg, #eff6ff, #f0f9ff); border:1px solid #bfdbfe;">
+                        <div style="font-size:0.75rem; color:#1e40af;">💎 {tip}</div>
                     </div>
                     """, unsafe_allow_html=True)
 
-    # ── 탭 3: CTA 전략 ──
-    with tab_cta:
-        st.caption("📚 Kakuko et al.(2024) · Deng(2024) 논문 기반 분석")
-
-        _cta_sections = [
-            ("social_proof", "사회적 증거", "👥", "#8b5cf6", "#f5f3ff", "#ede9fe"),
-            ("fomo", "FOMO 전략", "⏰", "#ef4444", "#fef2f2", "#fee2e2"),
-            ("cart_abandon", "장바구니 이탈 방지", "🛒", "#f59e0b", "#fffbeb", "#fef3c7"),
-            ("cta_button", "CTA 버튼 최적화", "🔘", "#06b6d4", "#ecfeff", "#cffafe"),
-        ]
-
-        for section_key, section_title, section_icon, accent, bg, bg2 in _cta_sections:
-            st.markdown(f"""
-            <div style="padding:0.5rem 0.8rem; margin:0.8rem 0 0.4rem; border-radius:8px; background:{bg}; border-left:4px solid {accent};">
-                <span style="font-size:1rem;">{section_icon}</span>
-                <span style="font-size:0.9rem; font-weight:700; color:{accent}; margin-left:0.3rem;">{section_title}</span>
-            </div>
-            """, unsafe_allow_html=True)
-
-            for item in cta[section_key]["items"]:
-                item_type = item.get("type", "")
-                example = item.get("example", "")
-
-                st.markdown(f"""
-                <div style="padding:0.6rem 0.8rem; margin:0.3rem 0 0.3rem 1rem; border-radius:8px; background:#fff; border:1px solid rgba(128,128,128,0.12);">
-                    <div style="font-weight:700; font-size:0.82rem; color:#334155; margin-bottom:0.2rem;">{item_type}</div>
-                    <div style="font-size:0.78rem; color:#475569; margin-bottom:0.3rem;">{item['action']}</div>
-                    <div style="font-size:0.68rem; color:#94a3b8; margin-bottom:0.3rem;">📖 {item['detail']}</div>
-                    {f'<div style="padding:0.4rem 0.6rem; border-radius:6px; background:{bg2}; border:1px dashed {accent}40; font-size:0.76rem; color:#1e293b;"><b>✍️ 적용 문구 예시:</b> {example}</div>' if example else ''}
-                </div>
-                """, unsafe_allow_html=True)
-
-    # ── 탭 4: 리뷰 ──
-    with tab_review:
+        # ── 리뷰 분석 (이 탭에 통합) ──
+        st.markdown("---")
+        st.markdown("**💬 리뷰 분석**")
         if detail_data_extra and not detail_data_extra.get("error"):
             info_cols = st.columns(3)
-            info_cols[0].markdown(f"**스토어:** {detail_data_extra.get('store_name', '-')}")
-            info_cols[1].markdown(f"**카테고리:** {detail_data_extra.get('category', '-')}")
-            info_cols[2].markdown(f"**상태:** {detail_data_extra.get('status', '-')}")
-            st.markdown("")
+            info_cols[0].markdown(f"스토어: **{detail_data_extra.get('store_name', '-')}**")
+            info_cols[1].markdown(f"카테고리: **{detail_data_extra.get('category', '-')}**")
+            info_cols[2].markdown(f"상태: **{detail_data_extra.get('status', '-')}**")
 
         if review_summary["pros"] or review_summary["cons"]:
             rv_cols = st.columns(2)
             with rv_cols[0]:
-                st.markdown("**👍 장점**")
+                st.markdown("👍 **장점**")
                 for p in review_summary["pros"]:
-                    st.markdown(f"&nbsp;&nbsp;{p}")
+                    st.markdown(f"&nbsp;&nbsp;✅ {p}")
                 if not review_summary["pros"]:
                     st.caption("추출된 장점 없음")
             with rv_cols[1]:
-                st.markdown("**👎 단점**")
+                st.markdown("👎 **개선점**")
                 for c in review_summary["cons"]:
-                    st.markdown(f"&nbsp;&nbsp;{c}")
+                    st.markdown(f"&nbsp;&nbsp;⚠️ {c}")
                 if not review_summary["cons"]:
                     st.caption("추출된 단점 없음")
             if blog_reviews:
-                st.markdown("**📝 출처**")
-                for b in blog_reviews[:2]:
-                    st.markdown(f"[{b['title'][:40]}...]({b['link']})")
+                with st.expander("📝 리뷰 출처", expanded=False):
+                    for b in blog_reviews[:3]:
+                        st.markdown(f"[{b['title'][:40]}...]({b['link']})")
         else:
-            st.info("블로그 리뷰 데이터가 없습니다.")
+            st.caption("블로그 리뷰 데이터 없음")
+
+    # ── 탭 3: 종합 액션플랜 (실행 체크리스트) ──
+    with tab_action:
+        st.markdown("##### ✅ 실행 체크리스트")
+        st.caption("우선순위순으로 정리. 위에서부터 하나씩 처리하세요.")
+
+        _checklist = []
+        _num = 0
+
+        # 1. 가격 관련
+        if our_unit and comps and our_unit > comps[0]["개당가격"]:
+            _num += 1
+            _rec_unit = round(comps[0]["개당가격"] * 1.1)
+            _rec_total = round(_rec_unit * our_qty) if our_qty else our_price
+            _checklist.append(("긴급", "#ef4444", f"가격을 {_rec_total:,}원으로 수정 (최저가 대비 +10%, 개당 {_rec_unit:,}원)"))
+
+        # 2. 상품명 이슈
+        for issue in issues:
+            _num += 1
+            _checklist.append(("긴급", "#ef4444", f"상품명 수정: {issue}"))
+
+        # 3. 순위 문제
+        if our_rank > 30:
+            _num += 1
+            _checklist.append(("긴급", "#ef4444", f"검색 순위 {our_rank}위 — 광고 또는 가격/키워드 개선"))
+
+        # 4. 상품명 개선
+        if _changes_html:
+            _num += 1
+            _checklist.append(("중요", "#f59e0b", f"상품명에 키워드 추가 (위 Before→After 참고)"))
+
+        # 5. 썸네일
+        if our_unit and our_qty:
+            _num += 1
+            _checklist.append(("중요", "#f59e0b", f"썸네일에 '개당 {our_unit:,}원' 텍스트 삽입"))
+
+        for issue in thumb_analysis.get("issues", []):
+            _num += 1
+            _checklist.append(("중요", "#f59e0b", f"썸네일: {issue}"))
+
+        # 6. 상세페이지 CTA 관련 (핵심만)
+        _num += 1
+        _brand_name = extract_brand(our_name)
+        _checklist.append(("중요", "#f59e0b", f"상세페이지 상단에 '✅무료배송 ✅당일출고 ✅환불보장' 배지 추가"))
+        _num += 1
+        _checklist.append(("권장", "#22c55e", f"'{_brand_name} 시리즈 누적 판매 N만개' 사회적 증거 배지 삽입"))
+        _num += 1
+        _checklist.append(("권장", "#22c55e", f"'오늘 17시 이전 주문 → 당일 출고' 긴급성 문구 추가"))
+        _num += 1
+        _checklist.append(("권장", "#22c55e", f"상세페이지 중간·하단에 CTA 버튼 반복 배치"))
+
+        # 상품명 개선 제안
+        for sug in suggestions[:3]:
+            _num += 1
+            _checklist.append(("권장", "#22c55e", sug))
+
+        # 렌더링
+        for idx, (pri, color, text) in enumerate(_checklist):
+            st.markdown(f"""
+            <div style="display:flex; align-items:center; gap:0.5rem; padding:0.4rem 0.6rem; margin-bottom:0.2rem; border-radius:6px; background:#fff; border:1px solid #f0f0f0; border-left:3px solid {color};">
+                <span style="font-size:0.85rem; color:#ccc;">☐</span>
+                <span style="font-size:0.55rem; font-weight:700; color:#fff; background:{color}; padding:1px 5px; border-radius:3px; flex-shrink:0;">{pri}</span>
+                <span style="font-size:0.78rem; color:#333;">{text}</span>
+            </div>
+            """, unsafe_allow_html=True)
+
+        # CTA 세부 전략 (접힘)
+        with st.expander("📖 CTA 전략 상세 (참고용)", expanded=False):
+            _cta_sections = [
+                ("social_proof", "사회적 증거", "👥", "#8b5cf6", "#f5f3ff"),
+                ("fomo", "FOMO 전략", "⏰", "#ef4444", "#fef2f2"),
+                ("cart_abandon", "이탈 방지", "🛒", "#f59e0b", "#fffbeb"),
+                ("cta_button", "CTA 버튼", "🔘", "#06b6d4", "#ecfeff"),
+            ]
+            for section_key, section_title, section_icon, accent, bg in _cta_sections:
+                st.markdown(f"**{section_icon} {section_title}**")
+                for item in cta[section_key]["items"]:
+                    example = item.get("example", "")
+                    st.markdown(f"""
+                    <div style="padding:0.35rem 0.6rem; margin:0.15rem 0 0.15rem 0.5rem; border-radius:6px; background:{bg}; border-left:2px solid {accent};">
+                        <div style="font-size:0.75rem; font-weight:600; color:#334155;">{item.get('type','')}</div>
+                        <div style="font-size:0.72rem; color:#475569;">{item['action']}</div>
+                        {f'<div style="font-size:0.68rem; color:#666; margin-top:2px;">✍️ {example}</div>' if example else ''}
+                    </div>
+                    """, unsafe_allow_html=True)
 
 
 
