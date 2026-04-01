@@ -1992,11 +1992,26 @@ def show_action_dialog():
         format_func=lambda x: ACTION_TYPES[x],
         key="_action_type_radio", label_visibility="collapsed",
     )
-    memo = st.text_input("메모 (선택)", placeholder="예: 쿠팡 5% 할인 적용", key="_action_memo")
+
+    # 대응 유형에 따른 개선 내용 입력 (구체적 기록)
+    _detail_placeholders = {
+        "price_change": "예: 12,900원 → 10,900원으로 변경 (쿠팡)",
+        "page_edit": "예: 썸네일에 개당 단가 텍스트 추가",
+        "stock_check": "예: 발주 50개 요청 완료",
+        "no_issue": "예: 경쟁사 대비 가격 정상 확인",
+        "defer": "예: 내일 오전 마케팅팀과 협의 예정",
+    }
+    detail = st.text_input(
+        "개선 내용 (구체적으로)",
+        placeholder=_detail_placeholders.get(action_type, "어떻게 개선했는지 기록"),
+        key="_action_detail",
+    )
+    memo = st.text_input("추가 메모 (선택)", placeholder="기타 참고 사항", key="_action_memo")
     if st.button("완료 저장", use_container_width=True, type="primary"):
         st.session_state["_action_result"] = {
             "task_id": tid,
             "action_type": action_type,
+            "detail": detail,
             "memo": memo,
         }
         st.rerun()
@@ -2950,6 +2965,44 @@ if current_page == "dashboard":
                     "재고 부족": f"{info['부족']}개" if info["부족"] else "—",
                 })
             st.dataframe(pd.DataFrame(brand_rows), use_container_width=True, hide_index=True)
+
+    # ── CEO 대응 현황 (대시보드 메인) ──
+    _dash_today_str = today.strftime("%Y-%m-%d")
+    _dash_tasks = load_json(TASKS_FILE, {"tasks": []}).get("tasks", [])
+    _dash_today_actions = [t for t in _dash_tasks if t.get("due") == _dash_today_str and t.get("action")]
+    _dash_today_total = [t for t in _dash_tasks if t.get("due") == _dash_today_str]
+    _dash_done_count = sum(1 for t in _dash_today_total if t.get("done"))
+
+    if _dash_today_actions or _dash_today_total:
+        st.markdown('<div class="section-title"><span class="icon">📋</span> 오늘 직원 대응 현황</div>', unsafe_allow_html=True)
+
+        # 요약 카드
+        _dash_rate = round(_dash_done_count / len(_dash_today_total) * 100) if _dash_today_total else 0
+        _dc1, _dc2, _dc3 = st.columns(3)
+        _dc1.metric("전체 업무", f"{len(_dash_today_total)}건")
+        _dc2.metric("완료", f"{_dash_done_count}건")
+        _dc3.metric("대응률", f"{_dash_rate}%")
+
+        if _dash_today_actions:
+            for t in sorted(_dash_today_actions, key=lambda x: x.get("done_at", ""), reverse=True):
+                _a = t.get("action", {})
+                _time = _a.get("time", t.get("done_at", "")[-5:])
+                _type_lbl = _a.get("label", "✅")
+                _pname = t.get("meta", {}).get("product_name", t.get("title", ""))
+                _detail = _a.get("detail", "")
+                _memo = _a.get("memo", "")
+                _detail_html = f'<span style="color:#1565c0; font-size:0.78rem;"> — 📋 {_detail}</span>' if _detail else ""
+                _memo_html = f'<span style="color:#888; font-size:0.72rem;"> 💬 {_memo}</span>' if _memo else ""
+                st.markdown(f"""
+                <div style="padding:0.4rem 0.7rem; margin-bottom:0.2rem; border-radius:6px; background:#fafafa; border-left:3px solid #66bb6a;">
+                    <span style="font-size:0.72rem; color:#999;">{_time}</span>
+                    <span style="font-size:0.82rem; font-weight:600; margin-left:0.3rem;">{_type_lbl}</span>
+                    <span style="font-size:0.82rem;"> {_pname}</span>
+                    {_detail_html}{_memo_html}
+                </div>
+                """, unsafe_allow_html=True)
+        elif _dash_today_total:
+            st.info("아직 대응 완료된 업무가 없습니다.")
 
 
 # ─────────────────────────────────────────────
@@ -3919,6 +3972,7 @@ elif current_page == "daily_log":
                 t["action"] = {
                     "type": _action_result["action_type"],
                     "label": ACTION_TYPES.get(_action_result["action_type"], ""),
+                    "detail": _action_result.get("detail", ""),
                     "memo": _action_result.get("memo", ""),
                     "worker": "MD",
                     "time": datetime.now(KST).strftime("%H:%M"),
@@ -4010,16 +4064,21 @@ elif current_page == "daily_log":
                     _time = _a.get("time", t.get("done_at", "")[-5:])
                     _type_lbl = _a.get("label", "✅")
                     _pname = t.get("meta", {}).get("product_name", t.get("title", ""))
+                    _detail = _a.get("detail", "")
                     _memo = _a.get("memo", "")
-                    _memo_html = f'<span class="al-memo">💬 {_memo}</span>' if _memo else ""
+                    _detail_html = f'<div style="font-size:0.78rem; color:#1565c0; margin-top:2px;">📋 {_detail}</div>' if _detail else ""
+                    _memo_html = f'<div style="font-size:0.72rem; color:#888; margin-top:1px;">💬 {_memo}</div>' if _memo else ""
                     _log_html += f"""
-                    <div class="action-log-row">
-                        <span class="al-time">{_time}</span>
-                        <span class="al-type">{_type_lbl}</span>
-                        <span class="al-name">{_pname}</span>
+                    <div style="padding:0.5rem 0.7rem; border-bottom:1px solid #eee;">
+                        <div style="display:flex; align-items:center; gap:0.5rem;">
+                            <span style="font-size:0.72rem; color:#999; width:40px; flex-shrink:0;">{_time}</span>
+                            <span style="font-size:0.82rem; font-weight:600; width:120px; flex-shrink:0;">{_type_lbl}</span>
+                            <span style="font-size:0.82rem; flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">{_pname}</span>
+                        </div>
+                        {_detail_html}
                         {_memo_html}
                     </div>"""
-                st.markdown(f'<div style="background:#fafafa; border-radius:8px; padding:0.3rem 0;">{_log_html}</div>', unsafe_allow_html=True)
+                st.markdown(f'<div style="background:#fafafa; border-radius:10px; overflow:hidden;">{_log_html}</div>', unsafe_allow_html=True)
 
         # ── ③ 송장 미출력 시 dim 처리 ──
         if not _today_shipped_log and not auto_tasks:
@@ -4179,18 +4238,21 @@ elif current_page == "daily_log":
                         _done_icon = "📋"
 
                     _action_badge = ""
+                    _detail_html = ""
                     _memo_html = ""
                     if action:
                         _action_badge = f'<span class="tr-badge bg-green">{action.get("label", "✅")}</span>'
+                        if action.get("detail"):
+                            _detail_html = f'<br><span style="font-size:0.78rem; color:#1565c0;">📋 {action["detail"]}</span>'
                         if action.get("memo"):
-                            _memo_html = f' · 💬 {action["memo"]}'
+                            _memo_html = f'<br><span style="font-size:0.72rem; color:#888;">💬 {action["memo"]}</span>'
 
                     st.markdown(f"""
                     <div class="task-row done-row" style="border-left: 4px solid #a5d6a7;">
                         <span class="tr-icon">{_done_icon}</span>
                         <div class="tr-body">
                             <div class="tr-name">{p_name} {_action_badge}</div>
-                            <div class="tr-detail">{done_at} 완료{_memo_html}</div>
+                            <div class="tr-detail">{done_at} 완료{_detail_html}{_memo_html}</div>
                         </div>
                     </div>
                     """, unsafe_allow_html=True)
