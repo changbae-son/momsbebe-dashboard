@@ -4180,6 +4180,7 @@ elif current_page == "daily_log":
                         _border_color = "#1e88e5"
 
                     # 과정 로그 조립: 대응타입 → 개선내용 → 메모 → 시간
+                    _done_time_short = done_at[-5:] if len(done_at) >= 5 else done_at
                     _process_parts = []
                     if action:
                         _act_label = action.get("label", "✅ 완료")
@@ -4188,10 +4189,12 @@ elif current_page == "daily_log":
                             _process_parts.append(f'<span style="color:#1565c0;">📋 {action["detail"]}</span>')
                         if action.get("memo"):
                             _process_parts.append(f'<span style="color:#777;">💬 {action["memo"]}</span>')
-                        _act_time = action.get("time", done_at[-5:] if len(done_at) >= 5 else done_at)
-                        _process_parts.append(f'<span style="color:#999;">{_act_time}</span>')
+                        _act_time = action.get("time", _done_time_short)
+                        _process_parts.append(f'<span style="color:#999;">⏱ {_act_time}</span>')
                     else:
-                        _process_parts.append(f'<span style="color:#999;">{done_at} 완료</span>')
+                        # action 없이 완료된 태스크 — 기본 로그 표시
+                        _process_parts.append(f'<span style="font-weight:600;">✅ 확인 완료</span>')
+                        _process_parts.append(f'<span style="color:#999;">⏱ {_done_time_short}</span>')
 
                     _process_log = ' · '.join(_process_parts)
 
