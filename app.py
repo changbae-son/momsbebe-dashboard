@@ -2948,11 +2948,52 @@ if current_page == "dashboard":
             st.success("저장되었습니다!")
             st.rerun()
 
-    # ── 오늘 요약 KPI ──
+    # ── 오늘 요약 KPI ── (병렬 로딩)
     st.markdown('<div class="section-title"><span class="icon">📊</span> 오늘 현황 요약</div>', unsafe_allow_html=True)
 
-    sales_data = fetch_yesterday_sales()
-    inventory_data = fetch_current_inventory()
+    # 대시보드 데이터 4개를 병렬로 동시 요청 (cold start 최적화)
+    from concurrent.futures import ThreadPoolExecutor
+    _dash_cache_key = "_dash_parallel_cache"
+    _dash_cache_ts = "_dash_parallel_ts"
+    _dash_ttl = 600  # 10분
+    _use_dash_cache = (
+        _dash_cache_key in st.session_state
+        and _dash_cache_ts in st.session_state
+        and (datetime.now(KST) - st.session_state[_dash_cache_ts]).total_seconds() < _dash_ttl
+    )
+    if _use_dash_cache:
+        sales_data = st.session_state[_dash_cache_key]["sales"]
+        inventory_data = st.session_state[_dash_cache_key]["inventory"]
+        product_names = st.session_state[_dash_cache_key]["products"]
+        insight_data = st.session_state[_dash_cache_key]["insight"]
+    else:
+        # st.secrets 값을 메인 스레드에서 미리 읽어둠
+        _onewms_keys = get_onewms_keys()
+
+        def _fetch_sales():
+            return fetch_yesterday_sales()
+        def _fetch_inv():
+            return fetch_current_inventory()
+        def _fetch_prod():
+            return fetch_product_names()
+        def _fetch_insight():
+            return fetch_sales_insight()
+
+        with ThreadPoolExecutor(max_workers=4) as _exec:
+            _f_sales = _exec.submit(_fetch_sales)
+            _f_inv = _exec.submit(_fetch_inv)
+            _f_prod = _exec.submit(_fetch_prod)
+            _f_insight = _exec.submit(_fetch_insight)
+        sales_data = _f_sales.result()
+        inventory_data = _f_inv.result()
+        product_names = _f_prod.result()
+        insight_data = _f_insight.result()
+        # 세션 캐시에 저장
+        st.session_state[_dash_cache_key] = {
+            "sales": sales_data, "inventory": inventory_data,
+            "products": product_names, "insight": insight_data,
+        }
+        st.session_state[_dash_cache_ts] = datetime.now(KST)
 
     sales_connected = sales_data["status"] == "연동 완료"
     inv_connected = inventory_data["status"] == "연동 완료"
@@ -2975,7 +3016,6 @@ if current_page == "dashboard":
         ]
 
     # 재고 KPI (독립)
-    product_names = fetch_product_names()
     total_all_sku = len(product_names)
 
     if inv_connected:
@@ -3012,7 +3052,7 @@ if current_page == "dashboard":
     # ── 판매 대응 상품 요약 ──
     st.markdown('<div class="section-title"><span class="icon">📋</span> 판매 대응 현황</div>', unsafe_allow_html=True)
 
-    insight_data = fetch_sales_insight()
+    # insight_data는 위에서 병렬 로딩 완료됨
 
     if insight_data["status"] in ("분석 완료", "송장 미출력"):
         anomalies = insight_data["anomalies"]
