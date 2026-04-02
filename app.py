@@ -4645,15 +4645,14 @@ elif current_page == "daily_log":
 # 🔍 상품 재발굴 (독립 페이지)
 # ═════════════════════════════════════════════
 elif current_page == "slow_moving":
-    st.markdown("## 🔍 상품 재발굴")
+    st.markdown('<h3 style="margin:0 0 0.3rem 0;">🔍 상품 재발굴</h3>', unsafe_allow_html=True)
     st.caption("장기 무출고 상품을 발굴하여 매출 기회를 만듭니다")
-    st.markdown("---")
 
     _SLOW_TIER_META = {
-        "remind":     {"icon": "🟡", "label": "리마인드",  "desc": "30~89일 무출고", "color": "#f59e0b", "bg": "linear-gradient(135deg,#fffbf0,#fff8e1)"},
-        "review":     {"icon": "🟠", "label": "재점검",    "desc": "90~179일 무출고", "color": "#e65100", "bg": "linear-gradient(135deg,#fff3e0,#ffe0b2)"},
-        "rediscover": {"icon": "🔴", "label": "재발굴",    "desc": "180~364일 무출고", "color": "#d32f2f", "bg": "linear-gradient(135deg,#fff5f5,#ffebee)"},
-        "convert":    {"icon": "🔵", "label": "전환검토",  "desc": "365일+ 무출고",   "color": "#1565c0", "bg": "linear-gradient(135deg,#e3f2fd,#bbdefb)"},
+        "remind":     {"icon": "🟡", "label": "리마인드",  "desc": "30~89일", "color": "#f59e0b", "bg": "linear-gradient(135deg,#fffbf0,#fff8e1)", "border": "#ffe082"},
+        "review":     {"icon": "🟠", "label": "재점검",    "desc": "90~179일", "color": "#e65100", "bg": "linear-gradient(135deg,#fff3e0,#ffe0b2)", "border": "#ffcc80"},
+        "rediscover": {"icon": "🔴", "label": "재발굴",    "desc": "180~364일", "color": "#d32f2f", "bg": "linear-gradient(135deg,#fff5f5,#ffebee)", "border": "#ef9a9a"},
+        "convert":    {"icon": "🔵", "label": "전환검토",  "desc": "365일+",   "color": "#1565c0", "bg": "linear-gradient(135deg,#e3f2fd,#bbdefb)", "border": "#90caf9"},
     }
 
     with st.spinner("📦 상품 재발굴 데이터 분석 중... (최초 로딩 시 1~2분 소요)"):
@@ -4665,40 +4664,24 @@ elif current_page == "slow_moving":
         _total_slow = _slow_data["total_slow"]
         _active_count = _total_products - _total_slow
 
-        # ── KPI 카드 ──
-        st.markdown(f"""
-        <div class="log-kpi-row">
-            <div class="log-kpi" style="background:{_SLOW_TIER_META['remind']['bg']}; border:1px solid #ffe082;">
-                <div class="kpi-icon">🟡</div>
-                <div class="kpi-label">리마인드</div>
-                <div class="kpi-value" style="color:#f59e0b;">{len(_tiers['remind'])}건</div>
-                <div class="kpi-sub">30~89일</div>
-            </div>
-            <div class="log-kpi" style="background:{_SLOW_TIER_META['review']['bg']}; border:1px solid #ffcc80;">
-                <div class="kpi-icon">🟠</div>
-                <div class="kpi-label">재점검</div>
-                <div class="kpi-value" style="color:#e65100;">{len(_tiers['review'])}건</div>
-                <div class="kpi-sub">90~179일</div>
-            </div>
-            <div class="log-kpi" style="background:{_SLOW_TIER_META['rediscover']['bg']}; border:1px solid #ef9a9a;">
-                <div class="kpi-icon">🔴</div>
-                <div class="kpi-label">재발굴</div>
-                <div class="kpi-value" style="color:#d32f2f;">{len(_tiers['rediscover'])}건</div>
-                <div class="kpi-sub">180~364일</div>
-            </div>
-            <div class="log-kpi" style="background:{_SLOW_TIER_META['convert']['bg']}; border:1px solid #90caf9;">
-                <div class="kpi-icon">🔵</div>
-                <div class="kpi-label">전환검토</div>
-                <div class="kpi-value" style="color:#1565c0;">{len(_tiers['convert'])}건</div>
-                <div class="kpi-sub">365일+</div>
-            </div>
-        </div>
-        """, unsafe_allow_html=True)
+        # ── KPI 카드 (가로 컴팩트) ──
+        _kpi_cards_html = ""
+        for _tk, _tm in _SLOW_TIER_META.items():
+            _cnt = len(_tiers.get(_tk, []))
+            _kpi_cards_html += f"""
+            <div style="flex:1; background:{_tm['bg']}; border:1px solid {_tm['border']}; border-radius:8px; padding:0.35rem 0.6rem; display:flex; align-items:center; gap:0.4rem;">
+                <span style="font-size:0.9rem;">{_tm['icon']}</span>
+                <span style="font-size:0.78rem; font-weight:600; color:#444;">{_tm['label']}</span>
+                <span style="font-size:0.95rem; font-weight:800; color:{_tm['color']}; margin-left:auto;">{_cnt}건</span>
+                <span style="font-size:0.65rem; color:#999;">{_tm['desc']}</span>
+            </div>"""
+
+        st.markdown(f'<div style="display:flex; gap:0.4rem; margin-bottom:0.5rem;">{_kpi_cards_html}</div>', unsafe_allow_html=True)
 
         # 요약 바
         _slow_pct = round(_total_slow / _total_products * 100) if _total_products > 0 else 0
         st.markdown(f"""
-        <div style="background:#f8f9fa; border-radius:8px; padding:0.4rem 0.8rem; margin-bottom:0.8rem; font-size:0.8rem; color:#555; display:flex; justify-content:space-between;">
+        <div style="background:#f8f9fa; border-radius:8px; padding:0.3rem 0.8rem; margin-bottom:0.6rem; font-size:0.75rem; color:#555; display:flex; justify-content:space-between;">
             <span>전체 <b>{_total_products:,}</b> SKU 중 <b style="color:#d32f2f;">{_total_slow:,}</b>건 부진 ({_slow_pct}%)</span>
             <span>정상 판매: <b style="color:#2e7d32;">{_active_count:,}</b>건</span>
         </div>
