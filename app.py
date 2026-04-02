@@ -1094,12 +1094,14 @@ def fetch_slow_moving_products() -> dict:
     for pid, pname in all_products.items():
         stock_qty = stock_map.get(pid, 0)
 
-        # "단"으로 시작하는 상품 = 단종
+        # "단" 또는 "(단)" 포함 상품 = 단종
         _pname_stripped = pname.strip()
-        _is_discontinued = _pname_stripped.startswith("단") and (
-            len(_pname_stripped) == 1
-            or _pname_stripped[1] in ("-", "_", " ", ")")
-            or not _pname_stripped[1].isalpha()
+        _is_discontinued = "(단)" in _pname_stripped or (
+            _pname_stripped.startswith("단") and (
+                len(_pname_stripped) == 1
+                or _pname_stripped[1] in ("-", "_", " ", ")")
+                or not _pname_stripped[1].isalpha()
+            )
         )
 
         if pid in last_sale:
