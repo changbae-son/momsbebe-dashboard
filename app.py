@@ -2076,7 +2076,7 @@ def show_shop_detail_dialog():
             "주문건수": shop["order_count"], "매출액": shop["amount"], "상품URL": url_text,
         })
     st.dataframe(
-        pd.DataFrame(rows), use_container_width=True, hide_index=True,
+        pd.DataFrame(rows), width="stretch", hide_index=True,
         column_config={
             "판매처": st.column_config.TextColumn("판매처", width="medium"),
             "판매수량": st.column_config.NumberColumn("판매수량", format="%d개"),
@@ -2165,7 +2165,7 @@ def show_action_dialog():
         key="_action_detail",
     )
     memo = st.text_input("추가 메모 (선택)", placeholder="기타 참고 사항", key="_action_memo")
-    if st.button("완료 저장", use_container_width=True, type="primary"):
+    if st.button("완료 저장", width="stretch", type="primary"):
         st.session_state["_action_result"] = {
             "task_id": tid,
             "action_type": action_type,
@@ -2305,7 +2305,7 @@ with st.sidebar:
     for label, page_id in menu_items.items():
         is_active = st.session_state.current_page == page_id
         btn_type = "primary" if is_active else "secondary"
-        if st.button(label, key=f"nav_{page_id}", use_container_width=True, type=btn_type):
+        if st.button(label, key=f"nav_{page_id}", width="stretch", type=btn_type):
             st.session_state.current_page = page_id
             st.rerun()
 
@@ -2627,7 +2627,7 @@ def show_detail_analysis(data: dict, all_df):
                         "수량": f"{comp['수량']}개",
                         "개당가격": f"{comp['개당가격']:,}원",
                     })
-                st.dataframe(pd.DataFrame(table_rows), use_container_width=True, hide_index=True)
+                st.dataframe(pd.DataFrame(table_rows), width="stretch", hide_index=True)
         else:
             st.info("상품명에서 수량 정보를 추출할 수 없어 개당 가격 비교가 어렵습니다.")
 
@@ -3123,7 +3123,7 @@ if current_page == "dashboard":
                     "총 출고량": info["총출고"],
                     "재고 부족": f"{info['부족']}개" if info["부족"] else "—",
                 })
-            st.dataframe(pd.DataFrame(brand_rows), use_container_width=True, hide_index=True)
+            st.dataframe(pd.DataFrame(brand_rows), width="stretch", hide_index=True)
 
     # ── CEO 대응 현황 (대시보드 메인) ──
     _dash_today_str = today.strftime("%Y-%m-%d")
@@ -3346,7 +3346,7 @@ elif current_page == "sales_inventory":
 
             # 테이블 표시
             st.dataframe(
-                df, use_container_width=True, hide_index=True,
+                df, width="stretch", hide_index=True,
                 column_config=col_config,
                 height=min(len(table_rows) * 35 + 60, 600),
             )
@@ -3374,7 +3374,7 @@ elif current_page == "sales_inventory":
                 )
             with sel_cols[1]:
                 btn_disabled = (selected_name == "" or selected_name not in product_map)
-                if st.button("📊 판매처 상세", key=f"{tab_prefix}_btn", use_container_width=True, disabled=btn_disabled):
+                if st.button("📊 판매처 상세", key=f"{tab_prefix}_btn", width="stretch", disabled=btn_disabled):
                     sel_item = product_map[selected_name]
                     sel_pid = sel_item["product_id"]
                     sel_name = product_names_map.get(sel_pid, sel_pid)
@@ -3444,7 +3444,7 @@ elif current_page == "sales_inventory":
                     rows.append({"브랜드": brand, "상품코드": pid, "상품명": name, "재고수량": str(stock_info["stock_qty"]), "출고량": str(stock_info["trans_qty"]), "오늘변동": "O"})
                 else:
                     rows.append({"브랜드": brand, "상품코드": pid, "상품명": name, "재고수량": "—", "출고량": "—", "오늘변동": ""})
-            st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True, height=600)
+            st.dataframe(pd.DataFrame(rows), width="stretch", hide_index=True, height=600)
 
         with tab_low:
             low = inventory_data.get("low_items", [])
@@ -3462,7 +3462,7 @@ elif current_page == "sales_inventory":
                     else:
                         status = "🔴 부족"
                     rows.append({"브랜드": brand, "상품코드": pid, "상품명": name, "재고수량": item["stock_qty"], "출고량": item["trans_qty"], "상태": status})
-                st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True,
+                st.dataframe(pd.DataFrame(rows), width="stretch", hide_index=True,
                               column_config={"재고수량": st.column_config.NumberColumn(format="%d개")},
                               height=600)
             else:
@@ -3493,7 +3493,7 @@ elif current_page == "sales_inventory":
                     "브랜드": brand, "총 SKU": info["품목수"], "오늘 출고 품목": info["출고품목"],
                     "총 출고량": info["총출고"], "재고 부족": info["부족"], "품절": info["품절"],
                 })
-            st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+            st.dataframe(pd.DataFrame(rows), width="stretch", hide_index=True)
 
     elif insight_data["status"] == "미연동":
         st.info("📡 원싱크(OneWMS) API 연동 후 판매 대응 분석이 가능합니다.")
@@ -3515,7 +3515,7 @@ elif current_page == "price_monitor":
     with search_col1:
         search_keyword = st.text_input("🔍 검색 키워드", value=_auto_kw, placeholder="검색할 상품 키워드를 입력하세요...", label_visibility="collapsed")
     with search_col2:
-        search_btn = st.button("🔍 검색", type="primary", use_container_width=True)
+        search_btn = st.button("🔍 검색", type="primary", width="stretch")
     # 자동 검색 트리거
     if _auto_kw and not search_btn:
         search_btn = True
@@ -3532,11 +3532,11 @@ elif current_page == "price_monitor":
                 with cols[i]:
                     c1, c2 = st.columns([4, 1])
                     with c1:
-                        if st.button(f"🔍 {kw}", key=f"hist_{row_start+i}", use_container_width=True):
+                        if st.button(f"🔍 {kw}", key=f"hist_{row_start+i}", width="stretch"):
                             search_keyword = kw
                             search_btn = True
                     with c2:
-                        if st.button("✕", key=f"hist_del_{row_start+i}", use_container_width=True):
+                        if st.button("✕", key=f"hist_del_{row_start+i}", width="stretch"):
                             remove_from_search_history(kw)
                             st.rerun()
 
@@ -3596,7 +3596,7 @@ elif current_page == "price_monitor":
                     for idx, (_, our_row) in enumerate(our_df.iterrows()):
                         with btn_cols[idx]:
                             btn_label = f"🔬 {our_row['판매처']} · {int(our_row['순위'])}위 상세분석"
-                            if st.button(btn_label, key=f"detail_{idx}", use_container_width=True):
+                            if st.button(btn_label, key=f"detail_{idx}", width="stretch"):
                                 st.session_state[f"show_detail_{idx}"] = True
                                 st.session_state[f"detail_data_{idx}"] = {
                                     "rank": int(our_row["순위"]),
@@ -3671,7 +3671,7 @@ elif current_page == "price_monitor":
                     paper_bgcolor="rgba(0,0,0,0)",
                     font=dict(size=11),
                 )
-                st.plotly_chart(fig, use_container_width=True)
+                st.plotly_chart(fig, width="stretch")
 
             # ── 순위 경쟁력 분석 ──
             st.markdown('<div class="section-title"><span class="icon">📈</span> 순위 경쟁력 분석</div>', unsafe_allow_html=True)
@@ -4427,7 +4427,7 @@ elif current_page == "daily_log":
                 new_type = st.selectbox("유형", ["daily", "weekly", "monthly"], format_func=lambda x: {"daily": "일일", "weekly": "주간", "monthly": "월간"}[x])
             with fc4:
                 new_writer = st.selectbox("작성자", ["MD", "CS", "CEO", "기타"])
-            add_submitted = st.form_submit_button("\U0001f4be 업무 추가", type="primary", use_container_width=True)
+            add_submitted = st.form_submit_button("\U0001f4be 업무 추가", type="primary", width="stretch")
             if add_submitted and new_title.strip():
                 add_task(new_title.strip(), task_type=new_type, priority=new_priority, due=today_str, writer=new_writer)
                 st.success("업무가 추가되었습니다!")
@@ -4535,7 +4535,7 @@ elif current_page == "daily_log":
                     w_priority = st.selectbox("우선순위", ["normal", "urgent", "routine"], format_func=lambda x: {"urgent": "긴급", "normal": "일반", "routine": "정기"}[x], key="weekly_pri")
                 with wc4:
                     w_writer = st.selectbox("작성자", ["MD", "CS", "CEO", "기타"], key="weekly_writer")
-                w_sub = st.form_submit_button("\U0001f4be 주간 업무 추가", use_container_width=True)
+                w_sub = st.form_submit_button("\U0001f4be 주간 업무 추가", width="stretch")
                 if w_sub and w_title.strip():
                     add_task(w_title.strip(), task_type="weekly", priority=w_priority, due=w_due.strftime("%Y-%m-%d"), writer=w_writer)
                     st.success("주간 업무가 추가되었습니다!")
@@ -4599,7 +4599,7 @@ elif current_page == "daily_log":
                     m_priority = st.selectbox("우선순위", ["normal", "urgent", "routine"], format_func=lambda x: {"urgent": "긴급", "normal": "일반", "routine": "정기"}[x], key="monthly_pri")
                 with mc4:
                     m_writer = st.selectbox("작성자", ["MD", "CS", "CEO", "기타"], key="monthly_writer")
-                m_sub = st.form_submit_button("\U0001f4be 월간 업무 추가", use_container_width=True)
+                m_sub = st.form_submit_button("\U0001f4be 월간 업무 추가", width="stretch")
                 if m_sub and m_title.strip():
                     add_task(m_title.strip(), task_type="monthly", priority=m_priority, due=m_due.strftime("%Y-%m-%d"), writer=m_writer)
                     st.success("월간 업무가 추가되었습니다!")
@@ -4653,7 +4653,7 @@ elif current_page == "daily_log":
                 s_color = st.selectbox("색상", list(color_labels.keys()), format_func=lambda x: color_labels[x], key="sticky_color")
             with sc3:
                 s_writer = st.selectbox("작성자", ["CEO", "MD", "CS", "기타"], key="sticky_writer")
-            s_sub = st.form_submit_button("\U0001f4cc 메모 추가", type="primary", use_container_width=True)
+            s_sub = st.form_submit_button("\U0001f4cc 메모 추가", type="primary", width="stretch")
             if s_sub and s_text.strip():
                 new_note = {
                     "id": str(uuid.uuid4()),
