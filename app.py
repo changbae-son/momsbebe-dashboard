@@ -2259,30 +2259,17 @@ def fetch_orders_by_date(date_str: str) -> list:
 
 @st.cache_data(ttl=1800, show_spinner=False)
 def fetch_orders_parallel(date_strings: tuple) -> dict:
-    """여러 날짜의 주문 데이터를 병렬로 가져옵니다. {date_str: [orders]}
-    캐시된 개별 날짜 데이터를 먼저 활용하고, 없는 날짜만 병렬 수집."""
+    """여러 날짜의 주문 데이터를 병렬로 가져옵니다. {date_str: [orders]}"""
     from concurrent.futures import ThreadPoolExecutor, as_completed
     results = {}
-    uncached_dates = []
-
-    # 1) 개별 날짜 캐시 먼저 확인
-    for d in date_strings:
-        try:
-            cached = fetch_orders_by_date(d)
-            results[d] = cached
-        except Exception:
-            uncached_dates.append(d)
-
-    # 2) 캐시 미스된 날짜만 병렬 수집
-    if uncached_dates:
-        with ThreadPoolExecutor(max_workers=7) as executor:
-            future_to_date = {executor.submit(_fetch_orders_by_date_raw, d): d for d in uncached_dates}
-            for future in as_completed(future_to_date):
-                date_str = future_to_date[future]
-                try:
-                    results[date_str] = future.result()
-                except Exception:
-                    results[date_str] = []
+    with ThreadPoolExecutor(max_workers=7) as executor:
+        future_to_date = {executor.submit(_fetch_orders_by_date_raw, d): d for d in date_strings}
+        for future in as_completed(future_to_date):
+            date_str = future_to_date[future]
+            try:
+                results[date_str] = future.result()
+            except Exception:
+                results[date_str] = []
     return results
 
 
