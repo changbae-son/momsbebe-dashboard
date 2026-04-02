@@ -154,22 +154,22 @@ st.markdown("""
 
     /* ── KPI 메트릭 카드 ── */
     .kpi-card {
-        padding: 0.7rem 0.8rem;
-        border-radius: 10px;
+        padding: 0.35rem 0.5rem;
+        border-radius: 8px;
         border: 1px solid rgba(128,128,128,0.12);
         background: rgba(128,128,128,0.03);
         text-align: center;
         transition: transform 0.2s, box-shadow 0.2s;
     }
     .kpi-card:hover {
-        transform: translateY(-2px);
-        box-shadow: 0 4px 12px rgba(0,0,0,0.06);
+        transform: translateY(-1px);
+        box-shadow: 0 2px 8px rgba(0,0,0,0.05);
     }
-    .kpi-card .icon { font-size: 1.2rem; margin-bottom: 0.15rem; }
-    .kpi-card .label { font-size: 0.72rem; opacity: 0.6; margin-bottom: 0.15rem; }
-    .kpi-card .value { font-size: 1.3rem; font-weight: 800; }
-    .kpi-card .sub { font-size: 0.65rem; opacity: 0.5; margin-top: 0.1rem; }
-    .kpi-card.pending .value { opacity: 0.35; font-size: 1rem; }
+    .kpi-card .icon { font-size: 0.95rem; margin-bottom: 0.1rem; }
+    .kpi-card .label { font-size: 0.65rem; opacity: 0.6; margin-bottom: 0.1rem; }
+    .kpi-card .value { font-size: 1.05rem; font-weight: 800; }
+    .kpi-card .sub { font-size: 0.58rem; opacity: 0.5; margin-top: 0.05rem; }
+    .kpi-card.pending .value { opacity: 0.35; font-size: 0.85rem; }
 
     /* ── 섹션 헤더 ── */
     .section-title {
