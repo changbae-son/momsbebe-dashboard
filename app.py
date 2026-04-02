@@ -2219,9 +2219,9 @@ def quick_shop_detail(pid: str, pname: str, avg_qty=0, today_shipped=None):
 # ─────────────────────────────────────────────
 # 판매처별 매출 조회
 # ─────────────────────────────────────────────
-@st.cache_data(ttl=600, show_spinner=False)
+@st.cache_data(ttl=21600, show_spinner=False)
 def fetch_shop_list() -> dict:
-    """판매처 목록을 가져옵니다."""
+    """판매처 목록을 가져옵니다. (거의 변하지 않으므로 6시간 캐시)"""
     data = call_onewms_api("get_etc_info", {"type": "product", "search_type": "shop"})
     if isinstance(data, dict) and data.get("error") == 0:
         return {item["code"]: item["name"] for item in data.get("data", [])}
@@ -2251,25 +2251,38 @@ def _fetch_orders_by_date_raw(date_str: str) -> list:
     return all_orders
 
 
-@st.cache_data(ttl=600, show_spinner=False)
+@st.cache_data(ttl=1800, show_spinner=False)
 def fetch_orders_by_date(date_str: str) -> list:
-    """특정 날짜의 주문 데이터 (단일 호출, 캐시)."""
+    """특정 날짜의 주문 데이터 (단일 호출, 30분 캐시)."""
     return _fetch_orders_by_date_raw(date_str)
 
 
-@st.cache_data(ttl=600, show_spinner=False)
+@st.cache_data(ttl=1800, show_spinner=False)
 def fetch_orders_parallel(date_strings: tuple) -> dict:
-    """여러 날짜의 주문 데이터를 병렬로 가져옵니다. {date_str: [orders]}"""
+    """여러 날짜의 주문 데이터를 병렬로 가져옵니다. {date_str: [orders]}
+    캐시된 개별 날짜 데이터를 먼저 활용하고, 없는 날짜만 병렬 수집."""
     from concurrent.futures import ThreadPoolExecutor, as_completed
     results = {}
-    with ThreadPoolExecutor(max_workers=7) as executor:
-        future_to_date = {executor.submit(_fetch_orders_by_date_raw, d): d for d in date_strings}
-        for future in as_completed(future_to_date):
-            date_str = future_to_date[future]
-            try:
-                results[date_str] = future.result()
-            except Exception:
-                results[date_str] = []
+    uncached_dates = []
+
+    # 1) 개별 날짜 캐시 먼저 확인
+    for d in date_strings:
+        try:
+            cached = fetch_orders_by_date(d)
+            results[d] = cached
+        except Exception:
+            uncached_dates.append(d)
+
+    # 2) 캐시 미스된 날짜만 병렬 수집
+    if uncached_dates:
+        with ThreadPoolExecutor(max_workers=7) as executor:
+            future_to_date = {executor.submit(_fetch_orders_by_date_raw, d): d for d in uncached_dates}
+            for future in as_completed(future_to_date):
+                date_str = future_to_date[future]
+                try:
+                    results[date_str] = future.result()
+                except Exception:
+                    results[date_str] = []
     return results
 
 
