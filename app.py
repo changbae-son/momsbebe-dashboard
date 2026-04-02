@@ -1088,11 +1088,19 @@ def fetch_slow_moving_products() -> dict:
             except Exception:
                 pass
 
-    # 4) 등급 분류
-    tiers = {"remind": [], "review": [], "rediscover": [], "convert": []}
+    # 4) 등급 분류 (단종 상품 별도 분리)
+    tiers = {"remind": [], "review": [], "rediscover": [], "convert": [], "discontinued": []}
 
     for pid, pname in all_products.items():
         stock_qty = stock_map.get(pid, 0)
+
+        # "단"으로 시작하는 상품 = 단종
+        _pname_stripped = pname.strip()
+        _is_discontinued = _pname_stripped.startswith("단") and (
+            len(_pname_stripped) == 1
+            or _pname_stripped[1] in ("-", "_", " ", ")")
+            or not _pname_stripped[1].isalpha()
+        )
 
         if pid in last_sale:
             try:
@@ -1103,9 +1111,6 @@ def fetch_slow_moving_products() -> dict:
         else:
             days_since = 999  # 365일 범위 내 출고 이력 없음
 
-        if days_since < 30:
-            continue  # 최근 판매 — 정상 상품
-
         item = {
             "product_id": pid,
             "product_name": pname,
@@ -1113,6 +1118,14 @@ def fetch_slow_moving_products() -> dict:
             "days_since": days_since,
             "stock_qty": stock_qty,
         }
+
+        # 단종 상품은 판매일과 무관하게 별도 분류
+        if _is_discontinued:
+            tiers["discontinued"].append(item)
+            continue
+
+        if days_since < 30:
+            continue  # 최근 판매 — 정상 상품
 
         if days_since < 90:
             tiers["remind"].append(item)
@@ -1127,10 +1140,12 @@ def fetch_slow_moving_products() -> dict:
     for key in tiers:
         tiers[key].sort(key=lambda x: -x["days_since"])
 
+    _slow_count = sum(len(v) for k, v in tiers.items() if k != "discontinued")
     return {
         "status": "분석 완료",
         "total_products": len(all_products),
-        "total_slow": sum(len(v) for v in tiers.values()),
+        "total_slow": _slow_count,
+        "total_discontinued": len(tiers["discontinued"]),
         "tiers": tiers,
     }
 
@@ -4649,10 +4664,11 @@ elif current_page == "slow_moving":
     st.caption("장기 무출고 상품을 발굴하여 매출 기회를 만듭니다")
 
     _SLOW_TIER_META = {
-        "remind":     {"icon": "🟡", "label": "리마인드",  "desc": "30~89일", "color": "#f59e0b", "bg": "linear-gradient(135deg,#fffbf0,#fff8e1)", "border": "#ffe082"},
-        "review":     {"icon": "🟠", "label": "재점검",    "desc": "90~179일", "color": "#e65100", "bg": "linear-gradient(135deg,#fff3e0,#ffe0b2)", "border": "#ffcc80"},
-        "rediscover": {"icon": "🔴", "label": "재발굴",    "desc": "180~364일", "color": "#d32f2f", "bg": "linear-gradient(135deg,#fff5f5,#ffebee)", "border": "#ef9a9a"},
-        "convert":    {"icon": "🔵", "label": "전환검토",  "desc": "365일+",   "color": "#1565c0", "bg": "linear-gradient(135deg,#e3f2fd,#bbdefb)", "border": "#90caf9"},
+        "remind":       {"icon": "🟡", "label": "리마인드",  "desc": "30~89일", "color": "#f59e0b", "bg": "linear-gradient(135deg,#fffbf0,#fff8e1)", "border": "#ffe082"},
+        "review":       {"icon": "🟠", "label": "재점검",    "desc": "90~179일", "color": "#e65100", "bg": "linear-gradient(135deg,#fff3e0,#ffe0b2)", "border": "#ffcc80"},
+        "rediscover":   {"icon": "🔴", "label": "재발굴",    "desc": "180~364일", "color": "#d32f2f", "bg": "linear-gradient(135deg,#fff5f5,#ffebee)", "border": "#ef9a9a"},
+        "convert":      {"icon": "🔵", "label": "전환검토",  "desc": "365일+",   "color": "#1565c0", "bg": "linear-gradient(135deg,#e3f2fd,#bbdefb)", "border": "#90caf9"},
+        "discontinued": {"icon": "⬛", "label": "단종",      "desc": "단종상품",  "color": "#616161", "bg": "linear-gradient(135deg,#f5f5f5,#e0e0e0)", "border": "#bdbdbd"},
     }
 
     with st.spinner("📦 상품 재발굴 데이터 분석 중... (최초 로딩 시 1~2분 소요)"):
@@ -4679,10 +4695,11 @@ elif current_page == "slow_moving":
         st.markdown(f'<div style="display:flex; gap:0.4rem; margin-bottom:0.5rem;">{_kpi_cards_html}</div>', unsafe_allow_html=True)
 
         # 요약 바
+        _total_disc = _slow_data.get("total_discontinued", 0)
         _slow_pct = round(_total_slow / _total_products * 100) if _total_products > 0 else 0
         st.markdown(f"""
         <div style="background:#f8f9fa; border-radius:8px; padding:0.3rem 0.8rem; margin-bottom:0.6rem; font-size:0.75rem; color:#555; display:flex; justify-content:space-between;">
-            <span>전체 <b>{_total_products:,}</b> SKU 중 <b style="color:#d32f2f;">{_total_slow:,}</b>건 부진 ({_slow_pct}%)</span>
+            <span>전체 <b>{_total_products:,}</b> SKU 중 부진 <b style="color:#d32f2f;">{_total_slow:,}</b>건({_slow_pct}%) · 단종 <b style="color:#616161;">{_total_disc:,}</b>건</span>
             <span>정상 판매: <b style="color:#2e7d32;">{_active_count:,}</b>건</span>
         </div>
         """, unsafe_allow_html=True)
@@ -4700,7 +4717,7 @@ elif current_page == "slow_moving":
             if not tier_items:
                 continue
 
-            _expanded = tier_key == "remind"  # 리마인드만 기본 펼침
+            _expanded = tier_key == "remind"  # 리마인드만 기본 펼침, 단종은 항상 접힘
 
             st.markdown(f"""
             <div class="log-section" style="border-left:4px solid {tier_meta['color']};">
