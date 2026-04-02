@@ -1012,9 +1012,9 @@ def fetch_current_inventory() -> dict:
 # ─────────────────────────────────────────────
 # 2-0. 상품 재발굴 분석 (장기 무출고 상품 분류)
 # ─────────────────────────────────────────────
-@st.cache_data(ttl=21600, show_spinner=False)
 def fetch_slow_moving_products() -> dict:
     """전체 상품 대비 출고 이력 분석 → 부진 등급 4단계 분류.
+    session_state 수동 캐싱 (6시간). @st.cache_data 중첩 호출 회피.
 
     등급:
       - remind (리마인드): 30~89일 무출고
@@ -1022,6 +1022,14 @@ def fetch_slow_moving_products() -> dict:
       - rediscover (재발굴): 180~364일 무출고
       - convert (전환검토): 365일+ 무출고 or 출고 이력 없음
     """
+    # 수동 캐싱: 6시간(21600초) 이내면 이전 결과 반환
+    _cache_key = "_slow_moving_cache"
+    _cache_ts_key = "_slow_moving_cache_ts"
+    if _cache_key in st.session_state and _cache_ts_key in st.session_state:
+        _elapsed = (datetime.now(KST) - st.session_state[_cache_ts_key]).total_seconds()
+        if _elapsed < 21600:
+            return st.session_state[_cache_key]
+
     from concurrent.futures import ThreadPoolExecutor, as_completed
 
     keys = get_onewms_keys()
@@ -1143,13 +1151,17 @@ def fetch_slow_moving_products() -> dict:
         tiers[key].sort(key=lambda x: -x["days_since"])
 
     _slow_count = sum(len(v) for k, v in tiers.items() if k != "discontinued")
-    return {
+    _result = {
         "status": "분석 완료",
         "total_products": len(all_products),
         "total_slow": _slow_count,
         "total_discontinued": len(tiers["discontinued"]),
         "tiers": tiers,
     }
+    # 수동 캐싱 저장
+    st.session_state[_cache_key] = _result
+    st.session_state[_cache_ts_key] = datetime.now(KST)
+    return _result
 
 
 # ─────────────────────────────────────────────
