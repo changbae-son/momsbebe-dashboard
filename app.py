@@ -2267,6 +2267,7 @@ with st.sidebar:
         "📦 판매대응 및 재고": "sales_inventory",
         "🛒 가격 모니터링": "price_monitor",
         "📝 업무 일지": "daily_log",
+        "🔍 상품 재발굴": "slow_moving",
     }
 
     if "current_page" not in st.session_state:
@@ -4121,7 +4122,7 @@ elif current_page == "daily_log":
         st.toast(f"✅ 대응 기록 완료")
 
     # ── 3 Tabs ──
-    tab1, tab_log, tab_slow, tab2, tab3 = st.tabs(["\U0001f4c5 오늘 업무", "\U0001f4ca 대응 로그", "\U0001f50d 상품 재발굴", "\U0001f4c6 주간/월간 계획", "\U0001f4cc 공유 메모"])
+    tab1, tab_log, tab2, tab3 = st.tabs(["\U0001f4c5 오늘 업무", "\U0001f4ca 대응 로그", "\U0001f4c6 주간/월간 계획", "\U0001f4cc 공유 메모"])
 
     # ════════════════════════════════════════════
     # Tab 1: 오늘 업무
@@ -4452,164 +4453,6 @@ elif current_page == "daily_log":
             st.info("아직 오늘 대응 완료된 업무가 없습니다. 업무를 처리하면 여기에 로그가 표시됩니다.")
 
     # ════════════════════════════════════════════
-    # Tab: 상품 재발굴 (부진재고 분석)
-    # ════════════════════════════════════════════
-    with tab_slow:
-        _SLOW_TIER_META = {
-            "remind":     {"icon": "🟡", "label": "리마인드",  "desc": "30~89일 무출고", "color": "#f59e0b", "bg": "linear-gradient(135deg,#fffbf0,#fff8e1)"},
-            "review":     {"icon": "🟠", "label": "재점검",    "desc": "90~179일 무출고", "color": "#e65100", "bg": "linear-gradient(135deg,#fff3e0,#ffe0b2)"},
-            "rediscover": {"icon": "🔴", "label": "재발굴",    "desc": "180~364일 무출고", "color": "#d32f2f", "bg": "linear-gradient(135deg,#fff5f5,#ffebee)"},
-            "convert":    {"icon": "🔵", "label": "전환검토",  "desc": "365일+ 무출고",   "color": "#1565c0", "bg": "linear-gradient(135deg,#e3f2fd,#bbdefb)"},
-        }
-
-        with st.spinner("📦 상품 재발굴 데이터 분석 중... (최초 로딩 시 1~2분 소요)"):
-            _slow_data = fetch_slow_moving_products()
-
-        if _slow_data["status"] == "분석 완료":
-            _tiers = _slow_data["tiers"]
-            _total_products = _slow_data["total_products"]
-            _total_slow = _slow_data["total_slow"]
-            _active_count = _total_products - _total_slow
-
-            # ── KPI 카드 ──
-            st.markdown(f"""
-            <div class="log-kpi-row">
-                <div class="log-kpi" style="background:{_SLOW_TIER_META['remind']['bg']}; border:1px solid #ffe082;">
-                    <div class="kpi-icon">🟡</div>
-                    <div class="kpi-label">리마인드</div>
-                    <div class="kpi-value" style="color:#f59e0b;">{len(_tiers['remind'])}건</div>
-                    <div class="kpi-sub">30~89일</div>
-                </div>
-                <div class="log-kpi" style="background:{_SLOW_TIER_META['review']['bg']}; border:1px solid #ffcc80;">
-                    <div class="kpi-icon">🟠</div>
-                    <div class="kpi-label">재점검</div>
-                    <div class="kpi-value" style="color:#e65100;">{len(_tiers['review'])}건</div>
-                    <div class="kpi-sub">90~179일</div>
-                </div>
-                <div class="log-kpi" style="background:{_SLOW_TIER_META['rediscover']['bg']}; border:1px solid #ef9a9a;">
-                    <div class="kpi-icon">🔴</div>
-                    <div class="kpi-label">재발굴</div>
-                    <div class="kpi-value" style="color:#d32f2f;">{len(_tiers['rediscover'])}건</div>
-                    <div class="kpi-sub">180~364일</div>
-                </div>
-                <div class="log-kpi" style="background:{_SLOW_TIER_META['convert']['bg']}; border:1px solid #90caf9;">
-                    <div class="kpi-icon">🔵</div>
-                    <div class="kpi-label">전환검토</div>
-                    <div class="kpi-value" style="color:#1565c0;">{len(_tiers['convert'])}건</div>
-                    <div class="kpi-sub">365일+</div>
-                </div>
-            </div>
-            """, unsafe_allow_html=True)
-
-            # 요약 바
-            _slow_pct = round(_total_slow / _total_products * 100) if _total_products > 0 else 0
-            st.markdown(f"""
-            <div style="background:#f8f9fa; border-radius:8px; padding:0.4rem 0.8rem; margin-bottom:0.8rem; font-size:0.8rem; color:#555; display:flex; justify-content:space-between;">
-                <span>전체 <b>{_total_products:,}</b> SKU 중 <b style="color:#d32f2f;">{_total_slow:,}</b>건 부진 ({_slow_pct}%)</span>
-                <span>정상 판매: <b style="color:#2e7d32;">{_active_count:,}</b>건</span>
-            </div>
-            """, unsafe_allow_html=True)
-
-            # ── 등급별 섹션 ──
-            _SLOW_ACTION_OPTIONS = {
-                "select": "— 액션 선택 —",
-                "price": "💰 가격 확인",
-                "page": "📝 상세페이지",
-                "detail": "🔍 판매처 상세",
-            }
-
-            for tier_key, tier_meta in _SLOW_TIER_META.items():
-                tier_items = _tiers.get(tier_key, [])
-                if not tier_items:
-                    continue
-
-                _expanded = tier_key == "remind"  # 리마인드만 기본 펼침
-
-                st.markdown(f"""
-                <div class="log-section" style="border-left:4px solid {tier_meta['color']};">
-                    <span>{tier_meta['icon']} {tier_meta['label']} — {tier_meta['desc']}</span>
-                    <span class="sec-count">{len(tier_items)}건</span>
-                </div>
-                """, unsafe_allow_html=True)
-
-                # 브랜드별 그룹핑
-                _slow_brand_groups = {}
-                for item in tier_items:
-                    brand = extract_brand(item["product_name"])
-                    if brand not in _slow_brand_groups:
-                        _slow_brand_groups[brand] = []
-                    _slow_brand_groups[brand].append(item)
-                _slow_brand_groups = dict(sorted(_slow_brand_groups.items(), key=lambda x: -len(x[1])))
-                _slow_brand_list = list(_slow_brand_groups.items())
-
-                # 2열 브랜드 배치
-                for _row_i in range(0, len(_slow_brand_list), 2):
-                    _grid = st.columns(2)
-                    for _col_i in range(2):
-                        _bi = _row_i + _col_i
-                        if _bi >= len(_slow_brand_list):
-                            break
-                        _brand, _items = _slow_brand_list[_bi]
-                        with _grid[_col_i]:
-                            with st.expander(f"📦 {_brand} ({len(_items)}건)", expanded=_expanded):
-                                for _si in _items:
-                                    _sid = _si["product_id"]
-                                    _sname = _si["product_name"]
-                                    _sdays = _si["days_since"]
-                                    _sstock = _si["stock_qty"]
-                                    _slast = _si.get("last_sale") or "기록없음"
-                                    _short_name = _sname.replace(f"{_brand}-", "").replace(f"{_brand} ", "") if _brand != _sname else _sname
-
-                                    # 무출고 기간에 따른 배지 색상
-                                    if _sdays >= 365:
-                                        _day_badge_color = "#1565c0"
-                                    elif _sdays >= 180:
-                                        _day_badge_color = "#d32f2f"
-                                    elif _sdays >= 90:
-                                        _day_badge_color = "#e65100"
-                                    else:
-                                        _day_badge_color = "#f59e0b"
-
-                                    _stock_color = "#d32f2f" if _sstock <= 5 else "#666"
-
-                                    # 상품 정보 + 액션 한 줄
-                                    _c_info, _c_act = st.columns([6, 4])
-                                    with _c_info:
-                                        st.markdown(f"""
-                                        <div style="padding:0.25rem 0.4rem; border-bottom:1px solid #f0f0f0;">
-                                            <div style="font-size:0.78rem; font-weight:600; color:#333; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">{tier_meta['icon']} {_short_name}</div>
-                                            <div style="font-size:0.68rem; color:#888; margin-top:1px;">
-                                                <span style="color:{_day_badge_color}; font-weight:600;">{_sdays}일</span> 무출고
-                                                · 재고 <span style="color:{_stock_color}; font-weight:600;">{_sstock}개</span>
-                                                · 최종 {_slast}
-                                            </div>
-                                        </div>
-                                        """, unsafe_allow_html=True)
-                                    with _c_act:
-                                        _slow_sel = st.selectbox(
-                                            "액션", options=list(_SLOW_ACTION_OPTIONS.keys()),
-                                            format_func=lambda x: _SLOW_ACTION_OPTIONS[x],
-                                            key=f"slow_{tier_key}_{_sid}",
-                                            label_visibility="collapsed",
-                                        )
-                                    if _slow_sel != "select":
-                                        if _slow_sel == "price":
-                                            st.session_state.current_page = "price_monitor"
-                                            st.session_state["_auto_price_keyword"] = _sname
-                                            st.rerun()
-                                        elif _slow_sel == "page":
-                                            st.session_state["_pending_product_pages"] = {"pid": _sid, "pname": _sname, "avg_qty": 0}
-                                            st.rerun()
-                                        elif _slow_sel == "detail":
-                                            st.session_state["_pending_shop_detail"] = {"pid": _sid, "pname": _sname, "avg_qty": 0}
-                                            st.rerun()
-
-        elif _slow_data["status"] == "미연동":
-            st.info("📡 OneWMS API가 연동되지 않았습니다. API 연동 후 상품 재발굴 분석이 가능합니다.")
-        else:
-            st.warning(f"데이터 로딩 중 문제가 발생했습니다: {_slow_data['status']}")
-
-    # ════════════════════════════════════════════
     # Tab 2: 주간/월간 계획
     # ════════════════════════════════════════════
     with tab2:
@@ -4796,6 +4639,169 @@ elif current_page == "daily_log":
                 st.rerun()
             elif s_sub:
                 st.warning("메모 내용을 입력해주세요.")
+
+
+# ═════════════════════════════════════════════
+# 🔍 상품 재발굴 (독립 페이지)
+# ═════════════════════════════════════════════
+elif current_page == "slow_moving":
+    st.markdown("## 🔍 상품 재발굴")
+    st.caption("장기 무출고 상품을 발굴하여 매출 기회를 만듭니다")
+    st.markdown("---")
+
+    _SLOW_TIER_META = {
+        "remind":     {"icon": "🟡", "label": "리마인드",  "desc": "30~89일 무출고", "color": "#f59e0b", "bg": "linear-gradient(135deg,#fffbf0,#fff8e1)"},
+        "review":     {"icon": "🟠", "label": "재점검",    "desc": "90~179일 무출고", "color": "#e65100", "bg": "linear-gradient(135deg,#fff3e0,#ffe0b2)"},
+        "rediscover": {"icon": "🔴", "label": "재발굴",    "desc": "180~364일 무출고", "color": "#d32f2f", "bg": "linear-gradient(135deg,#fff5f5,#ffebee)"},
+        "convert":    {"icon": "🔵", "label": "전환검토",  "desc": "365일+ 무출고",   "color": "#1565c0", "bg": "linear-gradient(135deg,#e3f2fd,#bbdefb)"},
+    }
+
+    with st.spinner("📦 상품 재발굴 데이터 분석 중... (최초 로딩 시 1~2분 소요)"):
+        _slow_data = fetch_slow_moving_products()
+
+    if _slow_data["status"] == "분석 완료":
+        _tiers = _slow_data["tiers"]
+        _total_products = _slow_data["total_products"]
+        _total_slow = _slow_data["total_slow"]
+        _active_count = _total_products - _total_slow
+
+        # ── KPI 카드 ──
+        st.markdown(f"""
+        <div class="log-kpi-row">
+            <div class="log-kpi" style="background:{_SLOW_TIER_META['remind']['bg']}; border:1px solid #ffe082;">
+                <div class="kpi-icon">🟡</div>
+                <div class="kpi-label">리마인드</div>
+                <div class="kpi-value" style="color:#f59e0b;">{len(_tiers['remind'])}건</div>
+                <div class="kpi-sub">30~89일</div>
+            </div>
+            <div class="log-kpi" style="background:{_SLOW_TIER_META['review']['bg']}; border:1px solid #ffcc80;">
+                <div class="kpi-icon">🟠</div>
+                <div class="kpi-label">재점검</div>
+                <div class="kpi-value" style="color:#e65100;">{len(_tiers['review'])}건</div>
+                <div class="kpi-sub">90~179일</div>
+            </div>
+            <div class="log-kpi" style="background:{_SLOW_TIER_META['rediscover']['bg']}; border:1px solid #ef9a9a;">
+                <div class="kpi-icon">🔴</div>
+                <div class="kpi-label">재발굴</div>
+                <div class="kpi-value" style="color:#d32f2f;">{len(_tiers['rediscover'])}건</div>
+                <div class="kpi-sub">180~364일</div>
+            </div>
+            <div class="log-kpi" style="background:{_SLOW_TIER_META['convert']['bg']}; border:1px solid #90caf9;">
+                <div class="kpi-icon">🔵</div>
+                <div class="kpi-label">전환검토</div>
+                <div class="kpi-value" style="color:#1565c0;">{len(_tiers['convert'])}건</div>
+                <div class="kpi-sub">365일+</div>
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
+
+        # 요약 바
+        _slow_pct = round(_total_slow / _total_products * 100) if _total_products > 0 else 0
+        st.markdown(f"""
+        <div style="background:#f8f9fa; border-radius:8px; padding:0.4rem 0.8rem; margin-bottom:0.8rem; font-size:0.8rem; color:#555; display:flex; justify-content:space-between;">
+            <span>전체 <b>{_total_products:,}</b> SKU 중 <b style="color:#d32f2f;">{_total_slow:,}</b>건 부진 ({_slow_pct}%)</span>
+            <span>정상 판매: <b style="color:#2e7d32;">{_active_count:,}</b>건</span>
+        </div>
+        """, unsafe_allow_html=True)
+
+        # ── 등급별 섹션 ──
+        _SLOW_ACTION_OPTIONS = {
+            "select": "— 액션 선택 —",
+            "price": "💰 가격 확인",
+            "page": "📝 상세페이지",
+            "detail": "🔍 판매처 상세",
+        }
+
+        for tier_key, tier_meta in _SLOW_TIER_META.items():
+            tier_items = _tiers.get(tier_key, [])
+            if not tier_items:
+                continue
+
+            _expanded = tier_key == "remind"  # 리마인드만 기본 펼침
+
+            st.markdown(f"""
+            <div class="log-section" style="border-left:4px solid {tier_meta['color']};">
+                <span>{tier_meta['icon']} {tier_meta['label']} — {tier_meta['desc']}</span>
+                <span class="sec-count">{len(tier_items)}건</span>
+            </div>
+            """, unsafe_allow_html=True)
+
+            # 브랜드별 그룹핑
+            _slow_brand_groups = {}
+            for item in tier_items:
+                brand = extract_brand(item["product_name"])
+                if brand not in _slow_brand_groups:
+                    _slow_brand_groups[brand] = []
+                _slow_brand_groups[brand].append(item)
+            _slow_brand_groups = dict(sorted(_slow_brand_groups.items(), key=lambda x: -len(x[1])))
+            _slow_brand_list = list(_slow_brand_groups.items())
+
+            # 2열 브랜드 배치
+            for _row_i in range(0, len(_slow_brand_list), 2):
+                _grid = st.columns(2)
+                for _col_i in range(2):
+                    _bi = _row_i + _col_i
+                    if _bi >= len(_slow_brand_list):
+                        break
+                    _brand, _items = _slow_brand_list[_bi]
+                    with _grid[_col_i]:
+                        with st.expander(f"📦 {_brand} ({len(_items)}건)", expanded=_expanded):
+                            for _si in _items:
+                                _sid = _si["product_id"]
+                                _sname = _si["product_name"]
+                                _sdays = _si["days_since"]
+                                _sstock = _si["stock_qty"]
+                                _slast = _si.get("last_sale") or "기록없음"
+                                _short_name = _sname.replace(f"{_brand}-", "").replace(f"{_brand} ", "") if _brand != _sname else _sname
+
+                                # 무출고 기간에 따른 배지 색상
+                                if _sdays >= 365:
+                                    _day_badge_color = "#1565c0"
+                                elif _sdays >= 180:
+                                    _day_badge_color = "#d32f2f"
+                                elif _sdays >= 90:
+                                    _day_badge_color = "#e65100"
+                                else:
+                                    _day_badge_color = "#f59e0b"
+
+                                _stock_color = "#d32f2f" if _sstock <= 5 else "#666"
+
+                                # 상품 정보 + 액션 한 줄
+                                _c_info, _c_act = st.columns([6, 4])
+                                with _c_info:
+                                    st.markdown(f"""
+                                    <div style="padding:0.25rem 0.4rem; border-bottom:1px solid #f0f0f0;">
+                                        <div style="font-size:0.78rem; font-weight:600; color:#333; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">{tier_meta['icon']} {_short_name}</div>
+                                        <div style="font-size:0.68rem; color:#888; margin-top:1px;">
+                                            <span style="color:{_day_badge_color}; font-weight:600;">{_sdays}일</span> 무출고
+                                            · 재고 <span style="color:{_stock_color}; font-weight:600;">{_sstock}개</span>
+                                            · 최종 {_slast}
+                                        </div>
+                                    </div>
+                                    """, unsafe_allow_html=True)
+                                with _c_act:
+                                    _slow_sel = st.selectbox(
+                                        "액션", options=list(_SLOW_ACTION_OPTIONS.keys()),
+                                        format_func=lambda x: _SLOW_ACTION_OPTIONS[x],
+                                        key=f"slow_{tier_key}_{_sid}",
+                                        label_visibility="collapsed",
+                                    )
+                                if _slow_sel != "select":
+                                    if _slow_sel == "price":
+                                        st.session_state.current_page = "price_monitor"
+                                        st.session_state["_auto_price_keyword"] = _sname
+                                        st.rerun()
+                                    elif _slow_sel == "page":
+                                        st.session_state["_pending_product_pages"] = {"pid": _sid, "pname": _sname, "avg_qty": 0}
+                                        st.rerun()
+                                    elif _slow_sel == "detail":
+                                        st.session_state["_pending_shop_detail"] = {"pid": _sid, "pname": _sname, "avg_qty": 0}
+                                        st.rerun()
+
+    elif _slow_data["status"] == "미연동":
+        st.info("📡 OneWMS API가 연동되지 않았습니다. API 연동 후 상품 재발굴 분석이 가능합니다.")
+    else:
+        st.warning(f"데이터 로딩 중 문제가 발생했습니다: {_slow_data['status']}")
 
 
 # ─────────────────────────────────────────────
