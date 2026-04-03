@@ -2177,7 +2177,6 @@ def show_action_dialog():
         st.rerun()
 
 
-@st.cache_data(ttl=1800, show_spinner=False)
 def quick_shop_detail(pid: str, pname: str, avg_qty=0, today_shipped=None):
     """업무 일지 등에서 바로 판매처 상세 팝업을 띄우는 헬퍼."""
     from datetime import timedelta as _td
@@ -4148,10 +4147,17 @@ elif current_page == "daily_log":
     pct = round((done_count / total_count * 100), 1) if total_count > 0 else 0
 
     # ── 팝업 트리거 (tabs 밖에서 실행해야 @st.dialog 정상 작동) ──
+    _qsd_cache = st.session_state.setdefault("_qsd_cache", {})
     _pending = st.session_state.pop("_pending_shop_detail", None)
     if _pending:
-        with st.spinner(f"📡 {_pending['pname']} 판매처 조회 중..."):
-            _shop_data = quick_shop_detail(_pending["pid"], _pending["pname"], _pending.get("avg_qty", 0))
+        _cache_key = f"{_pending['pid']}_{_pending['pname']}"
+        if _cache_key in _qsd_cache:
+            _shop_data = _qsd_cache[_cache_key]
+        else:
+            with st.spinner(f"📡 {_pending['pname']} 판매처 조회 중..."):
+                _shop_data = quick_shop_detail(_pending["pid"], _pending["pname"], _pending.get("avg_qty", 0))
+            if _shop_data:
+                _qsd_cache[_cache_key] = _shop_data
         if _shop_data:
             st.session_state["_shop_detail_data"] = _shop_data
             show_shop_detail_dialog()
@@ -4160,8 +4166,14 @@ elif current_page == "daily_log":
 
     _pending_pages = st.session_state.pop("_pending_product_pages", None)
     if _pending_pages:
-        with st.spinner(f"📡 {_pending_pages['pname']} 상품페이지 조회 중..."):
-            _pages_data = quick_shop_detail(_pending_pages["pid"], _pending_pages["pname"], _pending_pages.get("avg_qty", 0))
+        _cache_key = f"{_pending_pages['pid']}_{_pending_pages['pname']}"
+        if _cache_key in _qsd_cache:
+            _pages_data = _qsd_cache[_cache_key]
+        else:
+            with st.spinner(f"📡 {_pending_pages['pname']} 상품페이지 조회 중..."):
+                _pages_data = quick_shop_detail(_pending_pages["pid"], _pending_pages["pname"], _pending_pages.get("avg_qty", 0))
+            if _pages_data:
+                _qsd_cache[_cache_key] = _pages_data
         if _pages_data:
             st.session_state["_product_pages_data"] = _pages_data
             show_product_pages_dialog()
