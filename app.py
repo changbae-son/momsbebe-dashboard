@@ -4147,17 +4147,24 @@ elif current_page == "daily_log":
     pct = round((done_count / total_count * 100), 1) if total_count > 0 else 0
 
     # ── 팝업 트리거 (tabs 밖에서 실행해야 @st.dialog 정상 작동) ──
-    _qsd_cache = st.session_state.setdefault("_qsd_cache", {})
+    # 캐시를 shop_detail / product_pages 분리하여 데이터 오염 방지
+    _shop_cache = st.session_state.setdefault("_shop_detail_cache", {})
+    _pages_cache = st.session_state.setdefault("_product_pages_cache", {})
+
     _pending = st.session_state.pop("_pending_shop_detail", None)
     if _pending:
         _cache_key = f"{_pending['pid']}_{_pending['pname']}"
-        if _cache_key in _qsd_cache:
-            _shop_data = _qsd_cache[_cache_key]
+        if _cache_key in _shop_cache:
+            _shop_data = _shop_cache[_cache_key]
         else:
-            with st.spinner(f"📡 {_pending['pname']} 판매처 조회 중..."):
-                _shop_data = quick_shop_detail(_pending["pid"], _pending["pname"], _pending.get("avg_qty", 0))
-            if _shop_data:
-                _qsd_cache[_cache_key] = _shop_data
+            try:
+                with st.spinner(f"📡 {_pending['pname']} 판매처 조회 중..."):
+                    _shop_data = quick_shop_detail(_pending["pid"], _pending["pname"], _pending.get("avg_qty", 0))
+                if _shop_data:
+                    _shop_cache[_cache_key] = _shop_data
+            except Exception as e:
+                st.toast(f"⚠️ 조회 오류: {e}")
+                _shop_data = None
         if _shop_data:
             st.session_state["_shop_detail_data"] = _shop_data
             show_shop_detail_dialog()
@@ -4167,13 +4174,17 @@ elif current_page == "daily_log":
     _pending_pages = st.session_state.pop("_pending_product_pages", None)
     if _pending_pages:
         _cache_key = f"{_pending_pages['pid']}_{_pending_pages['pname']}"
-        if _cache_key in _qsd_cache:
-            _pages_data = _qsd_cache[_cache_key]
+        if _cache_key in _pages_cache:
+            _pages_data = _pages_cache[_cache_key]
         else:
-            with st.spinner(f"📡 {_pending_pages['pname']} 상품페이지 조회 중..."):
-                _pages_data = quick_shop_detail(_pending_pages["pid"], _pending_pages["pname"], _pending_pages.get("avg_qty", 0))
-            if _pages_data:
-                _qsd_cache[_cache_key] = _pages_data
+            try:
+                with st.spinner(f"📡 {_pending_pages['pname']} 상품페이지 조회 중..."):
+                    _pages_data = quick_shop_detail(_pending_pages["pid"], _pending_pages["pname"], _pending_pages.get("avg_qty", 0))
+                if _pages_data:
+                    _pages_cache[_cache_key] = _pages_data
+            except Exception as e:
+                st.toast(f"⚠️ 조회 오류: {e}")
+                _pages_data = None
         if _pages_data:
             st.session_state["_product_pages_data"] = _pages_data
             show_product_pages_dialog()
@@ -4183,6 +4194,9 @@ elif current_page == "daily_log":
     # ── 대응 완료 다이얼로그 트리거 ──
     _pending_action = st.session_state.pop("_pending_action_dialog", None)
     if _pending_action:
+        # 이전 dialog 입력값 초기화 (다른 상품의 값 오염 방지)
+        for _stale_key in ["_action_type_radio", "_action_detail", "_action_memo"]:
+            st.session_state.pop(_stale_key, None)
         st.session_state["_action_dialog_data"] = _pending_action
         show_action_dialog()
 
@@ -4368,6 +4382,7 @@ elif current_page == "daily_log":
                                         key=f"act_{tid}", label_visibility="collapsed",
                                     )
                                 if sel_action != "select":
+                                    st.session_state[f"act_{tid}"] = "select"  # 무한 반복 방지
                                     if sel_action == "detail":
                                         st.toast(f"🔄 {p_name} 판매처 데이터 조회 중...")
                                         st.session_state["_pending_shop_detail"] = {"pid": p_id, "pname": p_name, "avg_qty": avg_q}
@@ -5116,6 +5131,7 @@ elif current_page == "slow_moving":
                                         label_visibility="collapsed",
                                     )
                                 if _slow_sel != "select":
+                                    st.session_state[f"slow_{tier_key}_{_sid}"] = "select"  # 무한 반복 방지
                                     if _slow_sel == "price":
                                         st.session_state.current_page = "price_monitor"
                                         st.session_state["_auto_price_keyword"] = _sname
