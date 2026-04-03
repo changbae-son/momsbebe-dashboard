@@ -2939,7 +2939,7 @@ if current_page == "dashboard":
             height=100,
             placeholder="직원들에게 전달할 오늘의 전략을 입력하세요...",
         )
-        if st.button("💾 지시사항 저장", type="primary"):
+        if st.button("💾 지시사항 저장", type="primary", width="stretch"):
             ceo_data = {
                 "message": new_msg,
                 "updated": datetime.now(KST).strftime("%Y-%m-%d %H:%M"),
@@ -2951,8 +2951,7 @@ if current_page == "dashboard":
     # ── 오늘 요약 KPI ── (병렬 로딩)
     st.markdown('<div class="section-title"><span class="icon">📊</span> 오늘 현황 요약</div>', unsafe_allow_html=True)
 
-    # 대시보드 데이터 4개를 병렬로 동시 요청 (cold start 최적화)
-    from concurrent.futures import ThreadPoolExecutor
+    # 대시보드 데이터 로딩 (세션 캐시로 rerun 최적화)
     _dash_cache_key = "_dash_parallel_cache"
     _dash_cache_ts = "_dash_parallel_ts"
     _dash_ttl = 600  # 10분
@@ -2967,28 +2966,11 @@ if current_page == "dashboard":
         product_names = st.session_state[_dash_cache_key]["products"]
         insight_data = st.session_state[_dash_cache_key]["insight"]
     else:
-        # st.secrets 값을 메인 스레드에서 미리 읽어둠
-        _onewms_keys = get_onewms_keys()
-
-        def _fetch_sales():
-            return fetch_yesterday_sales()
-        def _fetch_inv():
-            return fetch_current_inventory()
-        def _fetch_prod():
-            return fetch_product_names()
-        def _fetch_insight():
-            return fetch_sales_insight()
-
-        with ThreadPoolExecutor(max_workers=4) as _exec:
-            _f_sales = _exec.submit(_fetch_sales)
-            _f_inv = _exec.submit(_fetch_inv)
-            _f_prod = _exec.submit(_fetch_prod)
-            _f_insight = _exec.submit(_fetch_insight)
-        sales_data = _f_sales.result()
-        inventory_data = _f_inv.result()
-        product_names = _f_prod.result()
-        insight_data = _f_insight.result()
-        # 세션 캐시에 저장
+        sales_data = fetch_yesterday_sales()
+        inventory_data = fetch_current_inventory()
+        product_names = fetch_product_names()
+        insight_data = fetch_sales_insight()
+        # 세션 캐시에 저장 (rerun 시 API 재호출 방지)
         st.session_state[_dash_cache_key] = {
             "sales": sales_data, "inventory": inventory_data,
             "products": product_names, "insight": insight_data,
@@ -4676,7 +4658,7 @@ elif current_page == "daily_log":
                         </div>
                     </div>
                     """, unsafe_allow_html=True)
-                    if st.button("\U0001f5d1 삭제", key=f"del_note_{note['id']}"):
+                    if st.button("\U0001f5d1 삭제", key=f"del_note_{note['id']}", width="stretch"):
                         all_notes[:] = [n for n in all_notes if n["id"] != note["id"]]
                         save_notes()
                         st.rerun()
