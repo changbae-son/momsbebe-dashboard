@@ -4326,6 +4326,20 @@ elif current_page == "daily_log":
             # 건수 많은 브랜드순 정렬
             return dict(sorted(groups.items(), key=lambda x: -len(x[1])))
 
+        def _on_action_change(tid, p_name, p_id, avg_q):
+            """selectbox on_change 콜백 — 콜백 안에서만 위젯 키 리셋 가능."""
+            sel = st.session_state.get(f"act_{tid}", "select")
+            st.session_state[f"act_{tid}"] = "select"  # 즉시 리셋 (콜백 내부는 허용)
+            if sel == "detail":
+                st.session_state["_pending_shop_detail"] = {"pid": p_id, "pname": p_name, "avg_qty": avg_q}
+            elif sel == "price":
+                st.session_state["current_page"] = "price_monitor"
+                st.session_state["_auto_price_keyword"] = p_name
+            elif sel == "page":
+                st.session_state["_pending_product_pages"] = {"pid": p_id, "pname": p_name, "avg_qty": avg_q}
+            elif sel == "done":
+                st.session_state["_pending_action_dialog"] = {"task_id": tid, "product_name": p_name}
+
         def _render_brand_table(task_list, section_label, section_class, row_class, icon, default_expanded=True):
             """브랜드별 그룹핑된 2열 컴팩트 테이블 렌더링."""
             if not task_list:
@@ -4360,10 +4374,8 @@ elif current_page == "daily_log":
                                 total_d = meta.get("total_days", 5)
                                 is_carried = tid in carried_ids
                                 carry_badge = '<span class="tr-badge bg-orange">⏰</span>' if is_carried else ""
-                                # 브랜드명 제거한 짧은 상품명
                                 short_name = p_name.replace(f"{brand}-", "").replace(f"{brand} ", "") if brand != p_name else p_name
 
-                                # 상품 정보 + 액션 selectbox 한 줄
                                 c_info, c_act = st.columns([6, 4])
                                 with c_info:
                                     st.markdown(f"""
@@ -4376,31 +4388,14 @@ elif current_page == "daily_log":
                                     </div>
                                     """, unsafe_allow_html=True)
                                 with c_act:
-                                    # 위젯 렌더링 전 리셋 (렌더 후 수정 금지 원칙)
-                                    if st.session_state.pop(f"_act_reset_{tid}", False):
-                                        st.session_state[f"act_{tid}"] = "select"
-                                    sel_action = st.selectbox(
+                                    st.selectbox(
                                         "액션", options=list(_ACTION_OPTIONS.keys()),
                                         format_func=lambda x: _ACTION_OPTIONS[x],
-                                        key=f"act_{tid}", label_visibility="collapsed",
+                                        key=f"act_{tid}",
+                                        label_visibility="collapsed",
+                                        on_change=_on_action_change,
+                                        args=(tid, p_name, p_id, avg_q),
                                     )
-                                if sel_action != "select":
-                                    st.session_state[f"_act_reset_{tid}"] = True  # 다음 렌더에서 리셋
-                                    if sel_action == "detail":
-                                        st.toast(f"🔄 {p_name} 판매처 데이터 조회 중...")
-                                        st.session_state["_pending_shop_detail"] = {"pid": p_id, "pname": p_name, "avg_qty": avg_q}
-                                        st.rerun()
-                                    elif sel_action == "price":
-                                        st.session_state.current_page = "price_monitor"
-                                        st.session_state["_auto_price_keyword"] = p_name
-                                        st.rerun()
-                                    elif sel_action == "page":
-                                        st.toast(f"🔄 {p_name} 상품 페이지 조회 중...")
-                                        st.session_state["_pending_product_pages"] = {"pid": p_id, "pname": p_name, "avg_qty": avg_q}
-                                        st.rerun()
-                                    elif sel_action == "done":
-                                        st.session_state["_pending_action_dialog"] = {"task_id": tid, "product_name": p_name}
-                                        st.rerun()
 
         # ── ✅ 완료된 업무 (긴급대응 위) ──
         if all_done:
@@ -5127,28 +5122,24 @@ elif current_page == "slow_moving":
                                     </div>
                                     """, unsafe_allow_html=True)
                                 with _c_act:
-                                    # 위젯 렌더링 전 리셋 (렌더 후 수정 금지 원칙)
                                     _slow_key = f"slow_{tier_key}_{_sid}"
-                                    if st.session_state.pop(f"_slow_reset_{_slow_key}", False):
-                                        st.session_state[_slow_key] = "select"
-                                    _slow_sel = st.selectbox(
+                                    def _on_slow_change(_sk=_slow_key, _sn=_sname, _si=_sid):
+                                        sel = st.session_state.get(_sk, "select")
+                                        st.session_state[_sk] = "select"
+                                        if sel == "price":
+                                            st.session_state["current_page"] = "price_monitor"
+                                            st.session_state["_auto_price_keyword"] = _sn
+                                        elif sel == "page":
+                                            st.session_state["_pending_product_pages"] = {"pid": _si, "pname": _sn, "avg_qty": 0}
+                                        elif sel == "detail":
+                                            st.session_state["_pending_shop_detail"] = {"pid": _si, "pname": _sn, "avg_qty": 0}
+                                    st.selectbox(
                                         "액션", options=list(_SLOW_ACTION_OPTIONS.keys()),
                                         format_func=lambda x: _SLOW_ACTION_OPTIONS[x],
                                         key=_slow_key,
                                         label_visibility="collapsed",
+                                        on_change=_on_slow_change,
                                     )
-                                if _slow_sel != "select":
-                                    st.session_state[f"_slow_reset_{_slow_key}"] = True  # 다음 렌더에서 리셋
-                                    if _slow_sel == "price":
-                                        st.session_state.current_page = "price_monitor"
-                                        st.session_state["_auto_price_keyword"] = _sname
-                                        st.rerun()
-                                    elif _slow_sel == "page":
-                                        st.session_state["_pending_product_pages"] = {"pid": _sid, "pname": _sname, "avg_qty": 0}
-                                        st.rerun()
-                                    elif _slow_sel == "detail":
-                                        st.session_state["_pending_shop_detail"] = {"pid": _sid, "pname": _sname, "avg_qty": 0}
-                                        st.rerun()
 
     elif _slow_data["status"] == "미연동":
         st.info("📡 OneWMS API가 연동되지 않았습니다. API 연동 후 상품 재발굴 분석이 가능합니다.")
