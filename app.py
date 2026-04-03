@@ -4376,13 +4376,16 @@ elif current_page == "daily_log":
                                     </div>
                                     """, unsafe_allow_html=True)
                                 with c_act:
+                                    # 위젯 렌더링 전 리셋 (렌더 후 수정 금지 원칙)
+                                    if st.session_state.pop(f"_act_reset_{tid}", False):
+                                        st.session_state[f"act_{tid}"] = "select"
                                     sel_action = st.selectbox(
                                         "액션", options=list(_ACTION_OPTIONS.keys()),
                                         format_func=lambda x: _ACTION_OPTIONS[x],
                                         key=f"act_{tid}", label_visibility="collapsed",
                                     )
                                 if sel_action != "select":
-                                    st.session_state[f"act_{tid}"] = "select"  # 무한 반복 방지
+                                    st.session_state[f"_act_reset_{tid}"] = True  # 다음 렌더에서 리셋
                                     if sel_action == "detail":
                                         st.toast(f"🔄 {p_name} 판매처 데이터 조회 중...")
                                         st.session_state["_pending_shop_detail"] = {"pid": p_id, "pname": p_name, "avg_qty": avg_q}
@@ -5124,14 +5127,18 @@ elif current_page == "slow_moving":
                                     </div>
                                     """, unsafe_allow_html=True)
                                 with _c_act:
+                                    # 위젯 렌더링 전 리셋 (렌더 후 수정 금지 원칙)
+                                    _slow_key = f"slow_{tier_key}_{_sid}"
+                                    if st.session_state.pop(f"_slow_reset_{_slow_key}", False):
+                                        st.session_state[_slow_key] = "select"
                                     _slow_sel = st.selectbox(
                                         "액션", options=list(_SLOW_ACTION_OPTIONS.keys()),
                                         format_func=lambda x: _SLOW_ACTION_OPTIONS[x],
-                                        key=f"slow_{tier_key}_{_sid}",
+                                        key=_slow_key,
                                         label_visibility="collapsed",
                                     )
                                 if _slow_sel != "select":
-                                    st.session_state[f"slow_{tier_key}_{_sid}"] = "select"  # 무한 반복 방지
+                                    st.session_state[f"_slow_reset_{_slow_key}"] = True  # 다음 렌더에서 리셋
                                     if _slow_sel == "price":
                                         st.session_state.current_page = "price_monitor"
                                         st.session_state["_auto_price_keyword"] = _sname
