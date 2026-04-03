@@ -4506,41 +4506,34 @@ elif current_page == "daily_log":
             </div>
             """, unsafe_allow_html=True)
 
-            # 날짜별 그룹핑
+            # 날짜별 그룹핑 후 각 그룹을 개별 렌더링
             _sorted_tasks = sorted(_done_tasks, key=lambda x: (x.get("due", ""), x.get("done_at", "") or ""), reverse=True)
-            _current_date = None
-            _log_html = ""
+            # 날짜별로 그룹화
+            from collections import OrderedDict
+            _date_groups = OrderedDict()
             for t in _sorted_tasks:
-                _t_date = t.get("due", "")
-                if _log_range != "오늘" and _t_date != _current_date:
-                    _current_date = _t_date
-                    _day_tasks = [x for x in _done_tasks if x.get("due") == _t_date]
-                    _log_html += f"""
-                    <div style="padding:0.5rem 0.8rem; background:#e3f2fd; font-size:0.82rem; font-weight:700; color:#1565c0; border-bottom:1px solid #bbdefb;">
-                        📅 {_t_date} ({len(_day_tasks)}건)
-                    </div>"""
-                _a = t.get("action", {})
-                _done_at = t.get("done_at", "") or ""
-                _time = _a.get("time", _done_at[-5:]) if _a else (_done_at[-5:] if len(_done_at) >= 5 else "—")
-                _type_lbl = _a.get("label", "✅ 확인 완료") if _a else "✅ 확인 완료"
-                _pname = t.get("meta", {}).get("product_name", t.get("title", ""))
-                _detail = _a.get("detail", "") if _a else ""
-                _memo = _a.get("memo", "") if _a else ""
-                # action 없는 태스크는 연한 스타일
-                _row_bg = "" if _a else " background:#fafafa;"
-                _detail_html = f'<div style="font-size:0.82rem; color:#1565c0; margin-top:2px;">📋 {_detail}</div>' if _detail else ""
-                _memo_html = f'<div style="font-size:0.78rem; color:#888; margin-top:1px;">💬 {_memo}</div>' if _memo else ""
-                _log_html += f"""
-                <div style="padding:0.6rem 0.8rem; border-bottom:1px solid #eee;{_row_bg}">
-                    <div style="display:flex; align-items:center; gap:0.5rem;">
-                        <span style="font-size:0.78rem; color:#999; width:45px; flex-shrink:0;">{_time}</span>
-                        <span style="font-size:0.88rem; font-weight:600; width:130px; flex-shrink:0;">{_type_lbl}</span>
-                        <span style="font-size:0.88rem; flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">{_pname}</span>
-                    </div>
-                    {_detail_html}
-                    {_memo_html}
-                </div>"""
-            st.markdown(f'<div style="background:#fafafa; border-radius:10px; overflow:hidden;">{_log_html}</div>', unsafe_allow_html=True)
+                _t_date = t.get("due", "unknown")
+                if _t_date not in _date_groups:
+                    _date_groups[_t_date] = []
+                _date_groups[_t_date].append(t)
+
+            for _date, _tasks_in_date in _date_groups.items():
+                _log_html = ""
+                if _log_range != "오늘":
+                    _log_html += f'<div style="padding:0.5rem 0.8rem; background:#e3f2fd; font-size:0.82rem; font-weight:700; color:#1565c0; border-bottom:1px solid #bbdefb;">📅 {_date} ({len(_tasks_in_date)}건)</div>'
+                for t in _tasks_in_date:
+                    _a = t.get("action", {})
+                    _done_at = t.get("done_at", "") or ""
+                    _time = _a.get("time", _done_at[-5:]) if _a else (_done_at[-5:] if len(_done_at) >= 5 else "—")
+                    _type_lbl = _a.get("label", "✅ 확인 완료") if _a else "✅ 확인 완료"
+                    _pname = t.get("meta", {}).get("product_name", t.get("title", ""))
+                    _detail = _a.get("detail", "") if _a else ""
+                    _memo = _a.get("memo", "") if _a else ""
+                    _row_bg = "" if _a else " background:#fafafa;"
+                    _detail_html = f'<div style="font-size:0.82rem; color:#1565c0; margin-top:2px;">📋 {_detail}</div>' if _detail else ""
+                    _memo_html = f'<div style="font-size:0.78rem; color:#888; margin-top:1px;">💬 {_memo}</div>' if _memo else ""
+                    _log_html += f'<div style="padding:0.6rem 0.8rem; border-bottom:1px solid #eee;{_row_bg}"><div style="display:flex; align-items:center; gap:0.5rem;"><span style="font-size:0.78rem; color:#999; width:45px; flex-shrink:0;">{_time}</span><span style="font-size:0.88rem; font-weight:600; width:130px; flex-shrink:0;">{_type_lbl}</span><span style="font-size:0.88rem; flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">{_pname}</span></div>{_detail_html}{_memo_html}</div>'
+                st.markdown(f'<div style="background:#fafafa; border-radius:10px; overflow:hidden; margin-bottom:0.5rem;">{_log_html}</div>', unsafe_allow_html=True)
         else:
             st.info("선택한 기간에 완료된 업무가 없습니다.")
 
