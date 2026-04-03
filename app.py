@@ -865,7 +865,7 @@ def call_onewms_api(func_name: str, params: dict = None) -> dict:
         payload.update(params)
 
     try:
-        resp = requests.get(keys["api_url"], params=payload, timeout=15)
+        resp = requests.get(keys["api_url"], params=payload, timeout=8)
         resp.raise_for_status()
         return resp.json()
     except requests.RequestException as e:
@@ -2968,10 +2968,11 @@ if current_page == "dashboard":
         product_names = st.session_state[_dash_cache_key]["products"]
         insight_data = st.session_state[_dash_cache_key]["insight"]
     else:
-        sales_data = fetch_yesterday_sales()
-        inventory_data = fetch_current_inventory()
-        product_names = fetch_product_names()
-        insight_data = fetch_sales_insight()
+        with st.spinner("📡 데이터 불러오는 중..."):
+            sales_data = fetch_yesterday_sales()
+            inventory_data = fetch_current_inventory()
+            product_names = fetch_product_names()
+            insight_data = fetch_sales_insight()
         # 세션 캐시에 저장 (rerun 시 API 재호출 방지)
         st.session_state[_dash_cache_key] = {
             "sales": sales_data, "inventory": inventory_data,
@@ -4680,8 +4681,8 @@ elif current_page == "daily_log":
             _prev_week_auto_total = 0
             _prev_week_auto_done = 0
             for pi in range(5):
-                pd = _prev_mon + timedelta(days=pi)
-                pd_str = pd.strftime("%Y-%m-%d")
+                _prev_day = _prev_mon + timedelta(days=pi)
+                pd_str = _prev_day.strftime("%Y-%m-%d")
                 pd_tasks = [t for t in all_tasks if t.get("due") == pd_str and t.get("auto")]
                 _prev_week_auto_total += len(pd_tasks)
                 _prev_week_auto_done += sum(1 for t in pd_tasks if t.get("done"))
