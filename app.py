@@ -4481,19 +4481,20 @@ elif current_page == "daily_log":
         _log_start_str = _log_start.strftime("%Y-%m-%d") if hasattr(_log_start, 'strftime') else str(_log_start)
         _log_end_str = _log_end.strftime("%Y-%m-%d") if hasattr(_log_end, 'strftime') else str(_log_end)
 
-        # 선택 기간의 대응 완료 태스크 수집
-        _action_tasks = [
+        # 선택 기간의 완료 태스크 수집 (action 유무 불문)
+        _done_tasks = [
             t for t in all_tasks
-            if t.get("action") and _log_start_str <= t.get("due", "") <= _log_end_str
+            if t.get("done") and _log_start_str <= t.get("due", "") <= _log_end_str
         ]
 
-        if _action_tasks:
+        if _done_tasks:
             # 대응 로그 KPI
-            _log_total = len(_action_tasks)
+            _log_total = len(_done_tasks)
+            _log_with_action = sum(1 for t in _done_tasks if t.get("action"))
             _log_types = {}
-            for _lt in _action_tasks:
+            for _lt in _done_tasks:
                 _la = _lt.get("action", {})
-                _llbl = _la.get("label", "✅")
+                _llbl = _la.get("label", "✅ 확인 완료") if _la else "✅ 확인 완료"
                 _log_types[_llbl] = _log_types.get(_llbl, 0) + 1
             _log_type_summary = " · ".join(f"{k} {v}건" for k, v in _log_types.items())
 
@@ -4501,33 +4502,36 @@ elif current_page == "daily_log":
             st.markdown(f"""
             <div style="background:linear-gradient(135deg,#e8f5e9,#f1f8e9); border-radius:12px; padding:1rem 1.2rem; margin-bottom:1rem;">
                 <div style="font-size:1.1rem; font-weight:700; color:#2e7d32;">📊 대응 로그 ({_period_label})</div>
-                <div style="font-size:0.9rem; color:#558b2f; margin-top:0.3rem;">총 {_log_total}건 완료 — {_log_type_summary}</div>
+                <div style="font-size:0.9rem; color:#558b2f; margin-top:0.3rem;">총 {_log_total}건 완료 (상세기록 {_log_with_action}건) — {_log_type_summary}</div>
             </div>
             """, unsafe_allow_html=True)
 
-            # 날짜별 그룹핑 (오늘이 아닌 경우)
-            _sorted_tasks = sorted(_action_tasks, key=lambda x: (x.get("due", ""), x.get("done_at", "")), reverse=True)
+            # 날짜별 그룹핑
+            _sorted_tasks = sorted(_done_tasks, key=lambda x: (x.get("due", ""), x.get("done_at", "") or ""), reverse=True)
             _current_date = None
             _log_html = ""
             for t in _sorted_tasks:
                 _t_date = t.get("due", "")
                 if _log_range != "오늘" and _t_date != _current_date:
                     _current_date = _t_date
-                    _day_tasks = [x for x in _action_tasks if x.get("due") == _t_date]
+                    _day_tasks = [x for x in _done_tasks if x.get("due") == _t_date]
                     _log_html += f"""
                     <div style="padding:0.5rem 0.8rem; background:#e3f2fd; font-size:0.82rem; font-weight:700; color:#1565c0; border-bottom:1px solid #bbdefb;">
                         📅 {_t_date} ({len(_day_tasks)}건)
                     </div>"""
                 _a = t.get("action", {})
-                _time = _a.get("time", t.get("done_at", "")[-5:])
-                _type_lbl = _a.get("label", "✅")
+                _done_at = t.get("done_at", "") or ""
+                _time = _a.get("time", _done_at[-5:]) if _a else (_done_at[-5:] if len(_done_at) >= 5 else "—")
+                _type_lbl = _a.get("label", "✅ 확인 완료") if _a else "✅ 확인 완료"
                 _pname = t.get("meta", {}).get("product_name", t.get("title", ""))
-                _detail = _a.get("detail", "")
-                _memo = _a.get("memo", "")
+                _detail = _a.get("detail", "") if _a else ""
+                _memo = _a.get("memo", "") if _a else ""
+                # action 없는 태스크는 연한 스타일
+                _row_bg = "" if _a else " background:#fafafa;"
                 _detail_html = f'<div style="font-size:0.82rem; color:#1565c0; margin-top:2px;">📋 {_detail}</div>' if _detail else ""
                 _memo_html = f'<div style="font-size:0.78rem; color:#888; margin-top:1px;">💬 {_memo}</div>' if _memo else ""
                 _log_html += f"""
-                <div style="padding:0.6rem 0.8rem; border-bottom:1px solid #eee;">
+                <div style="padding:0.6rem 0.8rem; border-bottom:1px solid #eee;{_row_bg}">
                     <div style="display:flex; align-items:center; gap:0.5rem;">
                         <span style="font-size:0.78rem; color:#999; width:45px; flex-shrink:0;">{_time}</span>
                         <span style="font-size:0.88rem; font-weight:600; width:130px; flex-shrink:0;">{_type_lbl}</span>
@@ -4538,7 +4542,7 @@ elif current_page == "daily_log":
                 </div>"""
             st.markdown(f'<div style="background:#fafafa; border-radius:10px; overflow:hidden;">{_log_html}</div>', unsafe_allow_html=True)
         else:
-            st.info("선택한 기간에 대응 완료된 업무가 없습니다.")
+            st.info("선택한 기간에 완료된 업무가 없습니다.")
 
     # ════════════════════════════════════════════
     # Tab 2: 주간/월간 계획
