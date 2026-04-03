@@ -3629,9 +3629,11 @@ if _pending_action:
 
 _pending_price = st.session_state.pop("_pending_price_check", None)
 if _pending_price:
-    # 다이얼로그 내부 상태 초기화 (새 상품 검색 시 이전 결과 제거)
-    st.session_state.pop("_price_dlg_result", None)
-    st.session_state.pop("_price_dlg_searched", None)
+    # 다이얼로그 내부 상태 완전 초기화
+    # _price_dlg_kw 를 반드시 제거해야 새 상품 키워드가 text_input에 반영됨
+    # (Streamlit: key가 session_state에 남아있으면 value= 파라미터 무시)
+    for _stale in ["_price_dlg_result", "_price_dlg_searched", "_price_dlg_kw"]:
+        st.session_state.pop(_stale, None)
     st.session_state["_price_check_data"] = _pending_price
     show_price_check_dialog()
 
