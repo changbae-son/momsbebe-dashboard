@@ -2374,6 +2374,101 @@ def _score_pdp(parsed: dict) -> dict:
     }
 
 
+def _enrich_with_examples(scores: dict, parsed: dict, pname: str, brand: str) -> dict:
+    """각 개선 포인트에 실제 상품 데이터 기반 구체적 예시를 추가.
+    issue 문자열에 '\n__EX__예시 내용' 형태로 예시를 덧붙인다.
+    """
+    import copy
+    _s = copy.deepcopy(scores)
+    _title   = (parsed.get("og_title") or pname or "").strip()
+    _desc    = (parsed.get("og_description") or "").strip()
+    _pi      = parsed.get("price_info", {})
+    _ri      = parsed.get("review_info", {})
+    _sale    = _pi.get("sale_price")
+    _orig    = _pi.get("original_price")
+    _disc    = _pi.get("discount_rate")
+    _rc      = _ri.get("count", 0)
+    _rr      = _ri.get("rating") or 0
+    _ic      = parsed.get("image_count", 0)
+    _brand   = brand or ""
+    _pname_s = pname[:20] if pname else ""
+
+    def _add(cat, idx, ex):
+        if cat in _s and idx < len(_s[cat]["issues"]):
+            _s[cat]["issues"][idx] += f"\n__EX__{ex}"
+
+    # ── A. 최초 3초 이해도 ──
+    for i, issue in enumerate(_s.get("A", {}).get("issues", [])):
+        if "CTA 버튼" in issue:
+            _add("A", i, '버튼 문구 예시: "지금 바로 구매하기 🛒" / "장바구니 담기" — 상단 고정 + 중간·하단 4회 반복 배치 (논문 기준)')
+        elif "가격 노출" in issue:
+            _ex = f"{_sale:,}원 크게 표시 + 할인율 배지 추가 권장" if _sale else "첫 화면 상단에 가격 크게 · 할인율 배지 추가"
+            _add("A", i, _ex)
+        elif "타이틀" in issue or "og:title" in issue:
+            _add("A", i, f'타이틀 예시: "{_brand} {_pname_s} | 핵심 기능 한 줄 요약" (15자 이상, 브랜드+기능+타겟 포함)')
+
+    # ── B. 문제 공감/상황 적합성 ──
+    for i, issue in enumerate(_s.get("B", {}).get("issues", [])):
+        if "반품" in issue or "환불" in issue:
+            _add("B", i, '"7일 무료 반품 · 불량 시 100% 환불 · 배송 사고 책임 교환" — 상품 설명 최하단 또는 배너로 노출')
+        elif "description" in issue or "공감" in issue:
+            _target = "우리 아이 피부" if any(k in (pname+brand).lower() for k in ["베베","baby","아기","유아"]) else "고객의 고민"
+            _add("B", i, f'공감 문구 예시: "{_target}을 해결합니다. [구체적 상황 묘사] → [제품 사용 후 변화]" 형식으로 첫 섹션 작성')
+        elif "텍스트" in issue or "본문" in issue:
+            _add("B", i, "이미지 사이에 텍스트 설명 추가: 성분·원산지·사용법·주의사항 → SEO 점수 + 구매 설득력 동시 향상")
+
+    # ── C. USP 명확성 ──
+    for i, issue in enumerate(_s.get("C", {}).get("issues", [])):
+        if "타이틀" in issue or "USP" in issue or "차별점" in issue:
+            _cur = f'현재: "{_title[:30]}"' if _title else "현재 타이틀 감지 안 됨"
+            _sug = f'"{_brand} {_pname_s} | [핵심 소재/기능] [타겟] [용량] | [인증·USP 한 줄]"'
+            _add("C", i, f"{_cur}\n  → 개선 예시: {_sug}\n  → 공식: 브랜드명 + 핵심기능 + 사용대상 + 용량/수량 + 차별화 키워드")
+        elif "옵션" in issue:
+            _add("C", i, "옵션 추가 예시: 색상 3종 / 용량 S·M·L / 향 선택 → 평균 전환율 +15~25% 기대 (선택 다양성 효과)")
+        elif "설명" in issue:
+            _add("C", i, f'USP 한 문장 예시: "{_brand}의 {_pname_s}은 [타겟]을 위한 [핵심 기능] 솔루션으로, [경쟁사 대비 차이점]입니다."')
+
+    # ── D. 신뢰/증거 설계 ──
+    for i, issue in enumerate(_s.get("D", {}).get("issues", [])):
+        if "리뷰" in issue and "평점" not in issue:
+            _coupon = max(500, int(_sale * 0.05)) if _sale else 1000
+            _add("D", i, f'리뷰 유도 전략: 구매 완료 3일 후 자동 문자 발송 + "리뷰 작성 시 {_coupon:,}원 적립금 즉시 지급" 이벤트 → 리뷰 100건 목표')
+        elif "평점" in issue and _rr:
+            _add("D", i, f"현재 평점 {_rr}점 → 1~3점 리뷰 TOP 불만 원인 3가지 파악 후 상품·CS 개선 → 개선 완료 후 기존 구매자 재사용 유도로 재평가")
+        elif "사회적 증명" in issue:
+            _cnt_str = f"{_rc//1000}천" if _rc >= 1000 else (str(_rc) if _rc else "N")
+            _add("D", i, f'"누적 판매 {_cnt_str}개 돌파" 배지 + 실구매자 사진 후기 상단 고정 + "이번 주 N명이 구매" 실시간 신호 추가')
+
+    # ── E. 스캔 UX/가독성 ──
+    for i, issue in enumerate(_s.get("E", {}).get("issues", [])):
+        if "이미지" in issue and "대표" not in issue:
+            _need = max(0, 10 - _ic)
+            _add("E", i, f"추가 필요 약 {_need}장: ①다각도 컷(정면·측면·후면) ②사용 장면(손에 들거나 실생활) ③성분표·인증서 클로즈업 ④before/after 비교 ⑤패키지 언박싱")
+        elif "대표 이미지" in issue:
+            _add("E", i, "흰 배경 정면 고해상도 + 브랜드 로고 포함 1:1 정방형 이미지 → 검색 결과·SNS 공유 시 전문적 첫인상")
+        elif "텍스트" in issue or "스캔" in issue:
+            _add("E", i, "각 섹션: [아이콘 + H2 제목 1줄] + [핵심 설명 2~3줄] + [불릿 포인트] 구성 → F패턴 시선 흐름 최적화")
+
+    # ── F. 제안/CTA 리듬 ──
+    for i, issue in enumerate(_s.get("F", {}).get("issues", [])):
+        if "가격 앵커링" in issue or "할인율" in issue:
+            if _sale:
+                _sug_orig = _orig or int(_sale * 1.3)
+                _sug_disc = _disc or round((1 - _sale / _sug_orig) * 100)
+                _add("F", i, f'현재: {_sale:,}원\n  → 개선 예시: ~~{_sug_orig:,}원~~ → **{_sale:,}원** ({_sug_disc}% 할인 · 오늘 마감)\n  → 효과: 즉시 구매 결정 유도 (논문: 가격 앵커링 72.1% 전환 영향)')
+            else:
+                _add("F", i, '예시: ~~정가 N원~~ → **특가 N원** (N% 할인 · 오늘까지) 형식으로 앵커링 효과 극대화')
+        elif "긴급성" in issue or "품절" in issue:
+            _add("F", i, '"현재 재고 12개 남음 · 오늘 17시 주문 시 내일 도착 · 이번 주 38명이 구매" — 실재고 기반으로 작성해야 신뢰 유지')
+        elif "쿠폰" in issue or "프로모션" in issue:
+            _c = max(500, int(_sale * 0.05)) if _sale else 1000
+            _add("F", i, f'"첫 구매 {_c:,}원 쿠폰" + "2개 구매 시 5% 추가 할인" + "당일 주문 무료 배송" 조합 → 장바구니 이탈 방지')
+        elif "CTA 버튼" in issue:
+            _add("F", i, '4회 배치 예시: ①상단 "지금 구매하기" ②혜택 섹션 후 "혜택 받고 구매" ③리뷰 섹션 후 "나도 구매하기" ④최하단 "구매하기" — 자연스러운 흐름')
+
+    return _s
+
+
 def _render_cta_scores(result: dict):
     """CTA 분석 결과 렌더링 (다이얼로그 내부)."""
     scored = result.get("result", {})
@@ -2418,16 +2513,29 @@ def _render_cta_scores(result: dict):
                         {_sc}<span style="font-size:0.7rem;color:#999;font-weight:400;">/10</span>
                     </div>
                 </div>""", unsafe_allow_html=True)
-    # 개선 포인트 (점수 낮은 순)
+    # 개선 포인트 (점수 낮은 순) — 문제 + 예시 박스로 분리 렌더링
     _all_issues = sorted(
         [(scores[k]["score"], k, scores[k]["label"], issue)
          for k in scores for issue in scores[k].get("issues", [])],
         key=lambda x: x[0])
     if _all_issues:
         st.markdown("#### 🚨 전환율 블로킹 개선 포인트")
-        for _sc, _k, _lbl, _issue in _all_issues[:6]:
-            _ic = "🔴" if _sc <= 3 else "🟠" if _sc <= 5 else "🟡"
-            st.markdown(f"{_ic} **{_k}. {_lbl}** — {_issue}")
+        for _sc, _k, _lbl, _issue_raw in _all_issues[:6]:
+            _priority = "🔴" if _sc <= 3 else "🟠" if _sc <= 5 else "🟡"
+            # __EX__ 구분자로 문제와 예시 분리
+            if "\n__EX__" in _issue_raw:
+                _main, _ex = _issue_raw.split("\n__EX__", 1)
+                # 예시 내부 추가 줄바꿈 처리
+                _ex_lines = _ex.replace("\n  → ", "\n→ ").strip()
+                st.markdown(f"{_priority} **{_k}. {_lbl}** — {_main}")
+                st.markdown(
+                    f'<div style="margin:0.1rem 0 0.6rem 1.6rem;padding:0.45rem 0.75rem;'
+                    f'background:#f8f9ff;border-left:3px solid #5c6bc0;border-radius:0 6px 6px 0;'
+                    f'font-size:0.82rem;color:#37474f;white-space:pre-wrap;">'
+                    f'💡 {_ex_lines}</div>',
+                    unsafe_allow_html=True)
+            else:
+                st.markdown(f"{_priority} **{_k}. {_lbl}** — {_issue_raw}")
     # 잘 된 점
     _all_good = sorted(
         [(scores[k]["score"], k, scores[k]["label"], g)
@@ -2481,6 +2589,9 @@ def show_page_analysis_dialog():
         with st.spinner(f"📡 {_selected['shop']} 페이지 분석 중... (최대 15초)"):
             _parsed = _parse_pdp_html(_selected["url"])
             _scored = _score_pdp(_parsed)
+            # 실제 상품 데이터 기반 개선 예시 생성
+            _scored["scores"] = _enrich_with_examples(
+                _scored.get("scores", {}), _parsed, pname, brand)
         st.session_state["_cta_last_result"] = {
             "shop": _selected["shop"], "url": _selected["url"], "result": _scored
         }
