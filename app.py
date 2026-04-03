@@ -4461,7 +4461,32 @@ elif current_page == "daily_log":
     # Tab: 대응 로그
     # ════════════════════════════════════════════
     with tab_log:
-        _action_tasks = [t for t in today_tasks if t.get("action")]
+        # 날짜 범위 선택
+        _log_col1, _log_col2, _log_col3 = st.columns([2, 2, 3])
+        with _log_col1:
+            _log_range = st.selectbox(
+                "조회 기간", ["오늘", "최근 3일", "최근 7일", "최근 30일", "직접 선택"],
+                key="_log_range_select", label_visibility="collapsed",
+            )
+        if _log_range == "직접 선택":
+            with _log_col2:
+                _log_start = st.date_input("시작일", value=now - timedelta(days=7), key="_log_start")
+            with _log_col3:
+                _log_end = st.date_input("종료일", value=now, key="_log_end")
+        else:
+            _range_days = {"오늘": 0, "최근 3일": 2, "최근 7일": 6, "최근 30일": 29}
+            _log_start = (now - timedelta(days=_range_days[_log_range])).date()
+            _log_end = now.date()
+
+        _log_start_str = _log_start.strftime("%Y-%m-%d") if hasattr(_log_start, 'strftime') else str(_log_start)
+        _log_end_str = _log_end.strftime("%Y-%m-%d") if hasattr(_log_end, 'strftime') else str(_log_end)
+
+        # 선택 기간의 대응 완료 태스크 수집
+        _action_tasks = [
+            t for t in all_tasks
+            if t.get("action") and _log_start_str <= t.get("due", "") <= _log_end_str
+        ]
+
         if _action_tasks:
             # 대응 로그 KPI
             _log_total = len(_action_tasks)
@@ -4472,15 +4497,27 @@ elif current_page == "daily_log":
                 _log_types[_llbl] = _log_types.get(_llbl, 0) + 1
             _log_type_summary = " · ".join(f"{k} {v}건" for k, v in _log_types.items())
 
+            _period_label = "오늘" if _log_range == "오늘" else f"{_log_start_str} ~ {_log_end_str}"
             st.markdown(f"""
             <div style="background:linear-gradient(135deg,#e8f5e9,#f1f8e9); border-radius:12px; padding:1rem 1.2rem; margin-bottom:1rem;">
-                <div style="font-size:1.1rem; font-weight:700; color:#2e7d32;">📊 오늘 대응 로그</div>
+                <div style="font-size:1.1rem; font-weight:700; color:#2e7d32;">📊 대응 로그 ({_period_label})</div>
                 <div style="font-size:0.9rem; color:#558b2f; margin-top:0.3rem;">총 {_log_total}건 완료 — {_log_type_summary}</div>
             </div>
             """, unsafe_allow_html=True)
 
+            # 날짜별 그룹핑 (오늘이 아닌 경우)
+            _sorted_tasks = sorted(_action_tasks, key=lambda x: (x.get("due", ""), x.get("done_at", "")), reverse=True)
+            _current_date = None
             _log_html = ""
-            for t in sorted(_action_tasks, key=lambda x: x.get("done_at", ""), reverse=True):
+            for t in _sorted_tasks:
+                _t_date = t.get("due", "")
+                if _log_range != "오늘" and _t_date != _current_date:
+                    _current_date = _t_date
+                    _day_tasks = [x for x in _action_tasks if x.get("due") == _t_date]
+                    _log_html += f"""
+                    <div style="padding:0.5rem 0.8rem; background:#e3f2fd; font-size:0.82rem; font-weight:700; color:#1565c0; border-bottom:1px solid #bbdefb;">
+                        📅 {_t_date} ({len(_day_tasks)}건)
+                    </div>"""
                 _a = t.get("action", {})
                 _time = _a.get("time", t.get("done_at", "")[-5:])
                 _type_lbl = _a.get("label", "✅")
@@ -4501,7 +4538,7 @@ elif current_page == "daily_log":
                 </div>"""
             st.markdown(f'<div style="background:#fafafa; border-radius:10px; overflow:hidden;">{_log_html}</div>', unsafe_allow_html=True)
         else:
-            st.info("아직 오늘 대응 완료된 업무가 없습니다. 업무를 처리하면 여기에 로그가 표시됩니다.")
+            st.info("선택한 기간에 대응 완료된 업무가 없습니다.")
 
     # ════════════════════════════════════════════
     # Tab 2: 주간/월간 계획
