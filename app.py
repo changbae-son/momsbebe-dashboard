@@ -2919,6 +2919,61 @@ current_page = st.session_state.get("current_page", "dashboard")
 
 
 # ─────────────────────────────────────────────
+# 🔔 공통 팝업 트리거 (모든 페이지에서 동작)
+# @st.dialog은 tabs/columns 밖에서 호출해야 하므로 라우팅 직전 처리
+# ─────────────────────────────────────────────
+_shop_cache = st.session_state.setdefault("_shop_detail_cache", {})
+_pages_cache = st.session_state.setdefault("_product_pages_cache", {})
+
+_pending = st.session_state.pop("_pending_shop_detail", None)
+if _pending:
+    _cache_key = f"{_pending['pid']}_{_pending['pname']}"
+    if _cache_key in _shop_cache:
+        _shop_data = _shop_cache[_cache_key]
+    else:
+        try:
+            with st.spinner(f"📡 {_pending['pname']} 판매처 조회 중..."):
+                _shop_data = quick_shop_detail(_pending["pid"], _pending["pname"], _pending.get("avg_qty", 0))
+            if _shop_data:
+                _shop_cache[_cache_key] = _shop_data
+        except Exception as e:
+            st.toast(f"⚠️ 조회 오류: {e}")
+            _shop_data = None
+    if _shop_data:
+        st.session_state["_shop_detail_data"] = _shop_data
+        show_shop_detail_dialog()
+    else:
+        st.toast(f"{_pending['pname']}: 최근 7일 주문 데이터 없음")
+
+_pending_pages = st.session_state.pop("_pending_product_pages", None)
+if _pending_pages:
+    _cache_key = f"{_pending_pages['pid']}_{_pending_pages['pname']}"
+    if _cache_key in _pages_cache:
+        _pages_data = _pages_cache[_cache_key]
+    else:
+        try:
+            with st.spinner(f"📡 {_pending_pages['pname']} 상품페이지 조회 중..."):
+                _pages_data = quick_shop_detail(_pending_pages["pid"], _pending_pages["pname"], _pending_pages.get("avg_qty", 0))
+            if _pages_data:
+                _pages_cache[_cache_key] = _pages_data
+        except Exception as e:
+            st.toast(f"⚠️ 조회 오류: {e}")
+            _pages_data = None
+    if _pages_data:
+        st.session_state["_product_pages_data"] = _pages_data
+        show_product_pages_dialog()
+    else:
+        st.toast(f"{_pending_pages['pname']}: 최근 7일 주문 데이터 없음")
+
+_pending_action = st.session_state.pop("_pending_action_dialog", None)
+if _pending_action:
+    for _stale_key in ["_action_type_radio", "_action_detail", "_action_memo"]:
+        st.session_state.pop(_stale_key, None)
+    st.session_state["_action_dialog_data"] = _pending_action
+    show_action_dialog()
+
+
+# ─────────────────────────────────────────────
 # 📊 대시보드 (메인 요약 페이지)
 # ─────────────────────────────────────────────
 if current_page == "dashboard":
@@ -3974,24 +4029,6 @@ elif current_page == "daily_log":
     </style>
     """, unsafe_allow_html=True)
 
-    # ── 액션 조기 로딩 배너 (스피너보다 먼저 표시) ──
-    _early_pending = (
-        st.session_state.get("_pending_shop_detail") or
-        st.session_state.get("_pending_product_pages")
-    )
-    if _early_pending:
-        _ep_name = _early_pending.get("pname", "데이터")
-        st.markdown(f"""
-        <div style="background:#e3f2fd; border-left:4px solid #1565c0; border-radius:8px;
-                    padding:0.8rem 1.2rem; margin-bottom:1rem; display:flex; align-items:center; gap:0.6rem;">
-            <span style="font-size:1.3rem;">⏳</span>
-            <div>
-                <div style="font-weight:700; color:#1565c0; font-size:0.95rem;">🔄 불러오는 중...</div>
-                <div style="font-size:0.82rem; color:#555;">{_ep_name} 판매 데이터를 조회하고 있습니다. 잠시만 기다려 주세요.</div>
-            </div>
-        </div>
-        """, unsafe_allow_html=True)
-
     # ── 데이터 로드 ──
     now = datetime.now(KST)
     today_str = now.strftime("%Y-%m-%d")
@@ -4145,60 +4182,6 @@ elif current_page == "daily_log":
     done_count = sum(1 for t in today_tasks if t.get("done"))
     total_count = len(today_tasks)
     pct = round((done_count / total_count * 100), 1) if total_count > 0 else 0
-
-    # ── 팝업 트리거 (tabs 밖에서 실행해야 @st.dialog 정상 작동) ──
-    # 캐시를 shop_detail / product_pages 분리하여 데이터 오염 방지
-    _shop_cache = st.session_state.setdefault("_shop_detail_cache", {})
-    _pages_cache = st.session_state.setdefault("_product_pages_cache", {})
-
-    _pending = st.session_state.pop("_pending_shop_detail", None)
-    if _pending:
-        _cache_key = f"{_pending['pid']}_{_pending['pname']}"
-        if _cache_key in _shop_cache:
-            _shop_data = _shop_cache[_cache_key]
-        else:
-            try:
-                with st.spinner(f"📡 {_pending['pname']} 판매처 조회 중..."):
-                    _shop_data = quick_shop_detail(_pending["pid"], _pending["pname"], _pending.get("avg_qty", 0))
-                if _shop_data:
-                    _shop_cache[_cache_key] = _shop_data
-            except Exception as e:
-                st.toast(f"⚠️ 조회 오류: {e}")
-                _shop_data = None
-        if _shop_data:
-            st.session_state["_shop_detail_data"] = _shop_data
-            show_shop_detail_dialog()
-        else:
-            st.toast(f"{_pending['pname']}: 최근 7일 주문 데이터 없음")
-
-    _pending_pages = st.session_state.pop("_pending_product_pages", None)
-    if _pending_pages:
-        _cache_key = f"{_pending_pages['pid']}_{_pending_pages['pname']}"
-        if _cache_key in _pages_cache:
-            _pages_data = _pages_cache[_cache_key]
-        else:
-            try:
-                with st.spinner(f"📡 {_pending_pages['pname']} 상품페이지 조회 중..."):
-                    _pages_data = quick_shop_detail(_pending_pages["pid"], _pending_pages["pname"], _pending_pages.get("avg_qty", 0))
-                if _pages_data:
-                    _pages_cache[_cache_key] = _pages_data
-            except Exception as e:
-                st.toast(f"⚠️ 조회 오류: {e}")
-                _pages_data = None
-        if _pages_data:
-            st.session_state["_product_pages_data"] = _pages_data
-            show_product_pages_dialog()
-        else:
-            st.toast(f"{_pending_pages['pname']}: 최근 7일 주문 데이터 없음")
-
-    # ── 대응 완료 다이얼로그 트리거 ──
-    _pending_action = st.session_state.pop("_pending_action_dialog", None)
-    if _pending_action:
-        # 이전 dialog 입력값 초기화 (다른 상품의 값 오염 방지)
-        for _stale_key in ["_action_type_radio", "_action_detail", "_action_memo"]:
-            st.session_state.pop(_stale_key, None)
-        st.session_state["_action_dialog_data"] = _pending_action
-        show_action_dialog()
 
     # ── 대응 기록 결과 저장 ──
     _action_result = st.session_state.pop("_action_result", None)
