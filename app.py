@@ -2177,6 +2177,7 @@ def show_action_dialog():
         st.rerun()
 
 
+@st.cache_data(ttl=1800, show_spinner=False)
 def quick_shop_detail(pid: str, pname: str, avg_qty=0, today_shipped=None):
     """업무 일지 등에서 바로 판매처 상세 팝업을 띄우는 헬퍼."""
     from datetime import timedelta as _td
@@ -3974,6 +3975,24 @@ elif current_page == "daily_log":
     </style>
     """, unsafe_allow_html=True)
 
+    # ── 액션 조기 로딩 배너 (스피너보다 먼저 표시) ──
+    _early_pending = (
+        st.session_state.get("_pending_shop_detail") or
+        st.session_state.get("_pending_product_pages")
+    )
+    if _early_pending:
+        _ep_name = _early_pending.get("pname", "데이터")
+        st.markdown(f"""
+        <div style="background:#e3f2fd; border-left:4px solid #1565c0; border-radius:8px;
+                    padding:0.8rem 1.2rem; margin-bottom:1rem; display:flex; align-items:center; gap:0.6rem;">
+            <span style="font-size:1.3rem;">⏳</span>
+            <div>
+                <div style="font-weight:700; color:#1565c0; font-size:0.95rem;">🔄 불러오는 중...</div>
+                <div style="font-size:0.82rem; color:#555;">{_ep_name} 판매 데이터를 조회하고 있습니다. 잠시만 기다려 주세요.</div>
+            </div>
+        </div>
+        """, unsafe_allow_html=True)
+
     # ── 데이터 로드 ──
     now = datetime.now(KST)
     today_str = now.strftime("%Y-%m-%d")
@@ -4338,6 +4357,7 @@ elif current_page == "daily_log":
                                     )
                                 if sel_action != "select":
                                     if sel_action == "detail":
+                                        st.toast(f"🔄 {p_name} 판매처 데이터 조회 중...")
                                         st.session_state["_pending_shop_detail"] = {"pid": p_id, "pname": p_name, "avg_qty": avg_q}
                                         st.rerun()
                                     elif sel_action == "price":
@@ -4345,6 +4365,7 @@ elif current_page == "daily_log":
                                         st.session_state["_auto_price_keyword"] = p_name
                                         st.rerun()
                                     elif sel_action == "page":
+                                        st.toast(f"🔄 {p_name} 상품 페이지 조회 중...")
                                         st.session_state["_pending_product_pages"] = {"pid": p_id, "pname": p_name, "avg_qty": avg_q}
                                         st.rerun()
                                     elif sel_action == "done":
