@@ -595,6 +595,8 @@ DAILY_LOG_FILE = os.path.join(DATA_DIR, "daily_logs.json")
 TASKS_FILE = os.path.join(DATA_DIR, "tasks.json")
 STICKY_FILE = os.path.join(DATA_DIR, "sticky_notes.json")
 SEARCH_HISTORY_FILE = os.path.join(DATA_DIR, "search_history.json")
+WEEKLY_GOALS_FILE = os.path.join(DATA_DIR, "weekly_goals.json")
+MONTHLY_GOALS_FILE = os.path.join(DATA_DIR, "monthly_goals.json")
 
 
 # ─────────────────────────────────────────────
@@ -4538,70 +4540,260 @@ elif current_page == "daily_log":
             st.info("선택한 기간에 완료된 업무가 없습니다.")
 
     # ════════════════════════════════════════════
-    # Tab 2: 주간/월간 계획
+    # Tab 2: 주간/월간 계획 (리디자인)
     # ════════════════════════════════════════════
     with tab2:
-        sub_tab_w, sub_tab_m = st.tabs(["주간", "월간"])
+        sub_tab_w, sub_tab_m = st.tabs(["주간 전략", "월간 운영"])
 
-        # ── 주간 뷰 ──
+        # ── 주간 키 계산 ──
+        weekday_idx = now.weekday()
+        mon = now - timedelta(days=weekday_idx)
+        week_key = mon.strftime("%Y-W%W")
+        week_dates = [(mon + timedelta(days=i)) for i in range(7)]
+        day_names_kr = ["월", "화", "수", "목", "금", "토", "일"]
+
+        # ── 주간 목표 로드/저장 ──
+        _wg_data = load_json(WEEKLY_GOALS_FILE, {"weeks": {}})
+        _this_week = _wg_data.get("weeks", {}).get(week_key, {"goals": []})
+        _week_goals = _this_week.get("goals", [])
+
+        # ══════════════════════════════════════
+        # 주간 전략 뷰
+        # ══════════════════════════════════════
         with sub_tab_w:
-            # 이번 주 월~일
-            weekday_idx = now.weekday()  # 0=Mon
-            mon = now - timedelta(days=weekday_idx)
-            week_dates = [(mon + timedelta(days=i)) for i in range(7)]
-            day_names = ["월", "화", "수", "목", "금", "토", "일"]
+            # ── 1. 이번 주 핵심 목표 ──
+            st.markdown(f"""
+            <div style="background:linear-gradient(135deg,#e3f2fd,#e8eaf6); border-radius:12px; padding:1rem 1.2rem; margin-bottom:1rem;">
+                <div style="display:flex; justify-content:space-between; align-items:center;">
+                    <div style="font-size:1.1rem; font-weight:700; color:#1565c0;">🎯 이번 주 핵심 목표</div>
+                    <div style="font-size:0.82rem; color:#5c6bc0;">{mon.strftime('%m/%d')} ~ {(mon+timedelta(days=6)).strftime('%m/%d')}</div>
+                </div>
+            </div>
+            """, unsafe_allow_html=True)
 
-            cols = st.columns(7)
-            for i, (d, dn) in enumerate(zip(week_dates, day_names)):
-                d_str = d.strftime("%Y-%m-%d")
-                d_tasks = [t for t in all_tasks if t.get("due") == d_str]
-                d_done = sum(1 for t in d_tasks if t.get("done"))
-                is_today = (d_str == today_str)
-                header_style = "color:#1e88e5; font-weight:800;" if is_today else ""
-                with cols[i]:
-                    st.markdown(f"""
-                    <div class="week-col">
-                        <div class="week-col-header" style="{header_style}">
-                            {dn} {d.day}일
-                            <span style="font-size:0.68rem; opacity:0.5;">({d_done}/{len(d_tasks)})</span>
-                        </div>
-                    """, unsafe_allow_html=True)
-                    if d_tasks:
-                        items_html = ""
-                        for t in d_tasks[:6]:
-                            cls = "week-task-item done" if t.get("done") else "week-task-item"
-                            items_html += f'<div class="{cls}">{t["title"][:12]}</div>'
-                        if len(d_tasks) > 6:
-                            items_html += f'<div style="font-size:0.7rem; opacity:0.5; text-align:center;">+{len(d_tasks)-6}건</div>'
-                        st.markdown(items_html, unsafe_allow_html=True)
-                    else:
-                        st.markdown('<div style="font-size:0.72rem; opacity:0.3; text-align:center; padding:8px;">-</div>', unsafe_allow_html=True)
-                    st.markdown("</div>", unsafe_allow_html=True)
+            # 목표 표시 + 완료 토글
+            _goal_changed = False
+            if _week_goals:
+                _done_goals = sum(1 for g in _week_goals if g.get("done"))
+                _total_goals = len(_week_goals)
+                _pct = int(_done_goals / _total_goals * 100) if _total_goals else 0
+                _bar_color = "#4caf50" if _pct >= 80 else "#ff9800" if _pct >= 40 else "#ef5350"
+                st.markdown(f"""
+                <div style="margin-bottom:0.8rem;">
+                    <div style="display:flex; justify-content:space-between; font-size:0.82rem; color:#666; margin-bottom:3px;">
+                        <span>달성률</span><span>{_done_goals}/{_total_goals} ({_pct}%)</span>
+                    </div>
+                    <div style="background:#e0e0e0; border-radius:6px; height:8px; overflow:hidden;">
+                        <div style="background:{_bar_color}; height:100%; width:{_pct}%; border-radius:6px; transition:width 0.3s;"></div>
+                    </div>
+                </div>
+                """, unsafe_allow_html=True)
+                for gi, g in enumerate(_week_goals):
+                    _g_done = g.get("done", False)
+                    _g_icon = "✅" if _g_done else "⬜"
+                    _g_style = "text-decoration:line-through; opacity:0.6;" if _g_done else ""
+                    _g_cat = g.get("category", "")
+                    _cat_badge = f'<span style="font-size:0.7rem; background:#e3f2fd; color:#1565c0; padding:1px 5px; border-radius:3px; margin-right:4px;">{_g_cat}</span>' if _g_cat else ""
+                    gcol1, gcol2 = st.columns([9, 1])
+                    with gcol1:
+                        st.markdown(f'<div style="font-size:0.92rem; padding:4px 0; {_g_style}">{_g_icon} {_cat_badge}{g.get("title","")}</div>', unsafe_allow_html=True)
+                    with gcol2:
+                        if st.button("✓" if not _g_done else "↩", key=f"wg_tog_{gi}"):
+                            _week_goals[gi]["done"] = not _g_done
+                            _goal_changed = True
+            else:
+                st.caption("등록된 주간 목표가 없습니다. 아래에서 추가하세요.")
 
-            # 주간 업무 추가
+            # 목표 추가 폼
+            with st.expander("➕ 주간 목표 추가", expanded=not bool(_week_goals)):
+                with st.form("add_week_goal_form", clear_on_submit=True):
+                    _wg_c1, _wg_c2 = st.columns([5, 2])
+                    with _wg_c1:
+                        _wg_title = st.text_input("목표", placeholder="예: 도루코 단가 재협상 완료", key="_wg_title")
+                    with _wg_c2:
+                        _wg_cat = st.selectbox("카테고리", ["가격관리", "상품관리", "마케팅", "CS대응", "발주/재고", "기타"], key="_wg_cat")
+                    _wg_sub = st.form_submit_button("🎯 목표 추가", width="stretch")
+                    if _wg_sub and _wg_title.strip():
+                        _week_goals.append({"title": _wg_title.strip(), "category": _wg_cat, "done": False})
+                        _goal_changed = True
+
+            if _goal_changed:
+                _wg_data.setdefault("weeks", {})[week_key] = {"goals": _week_goals}
+                save_json(WEEKLY_GOALS_FILE, _wg_data)
+                st.rerun()
+
             st.markdown("---")
-            st.markdown("**\u2795 주간 업무 추가**")
-            with st.form("add_weekly_form", clear_on_submit=True):
-                wc1, wc2, wc3, wc4 = st.columns([4, 2, 2, 2])
-                with wc1:
-                    w_title = st.text_input("업무 제목", placeholder="주간 업무 내용...", key="weekly_title")
-                with wc2:
-                    w_due = st.date_input("마감일", value=now, key="weekly_due")
-                with wc3:
-                    w_priority = st.selectbox("우선순위", ["normal", "urgent", "routine"], format_func=lambda x: {"urgent": "긴급", "normal": "일반", "routine": "정기"}[x], key="weekly_pri")
-                with wc4:
-                    w_writer = st.selectbox("작성자", ["MD", "CS", "CEO", "기타"], key="weekly_writer")
-                w_sub = st.form_submit_button("\U0001f4be 주간 업무 추가", width="stretch")
-                if w_sub and w_title.strip():
-                    add_task(w_title.strip(), task_type="weekly", priority=w_priority, due=w_due.strftime("%Y-%m-%d"), writer=w_writer)
-                    st.success("주간 업무가 추가되었습니다!")
-                    st.rerun()
 
-        # ── 월간 뷰 ──
+            # ── 2. 주간 업무 현황 (수동 vs 자동 분리) ──
+            st.markdown('<div style="font-size:1rem; font-weight:700; margin-bottom:0.5rem;">📋 이번 주 업무 현황</div>', unsafe_allow_html=True)
+
+            # 주 5일(월~금) 데이터 집계
+            _week_manual_total = 0
+            _week_manual_done = 0
+            _week_auto_total = 0
+            _week_auto_done = 0
+
+            _day_cols = st.columns(5)  # 월~금만
+            for i in range(5):
+                d = week_dates[i]
+                dn = day_names_kr[i]
+                d_str = d.strftime("%Y-%m-%d")
+                d_tasks_all = [t for t in all_tasks if t.get("due") == d_str]
+                d_manual = [t for t in d_tasks_all if not t.get("auto")]
+                d_auto = [t for t in d_tasks_all if t.get("auto")]
+                d_manual_done = sum(1 for t in d_manual if t.get("done"))
+                d_auto_done = sum(1 for t in d_auto if t.get("done"))
+                _week_manual_total += len(d_manual)
+                _week_manual_done += d_manual_done
+                _week_auto_total += len(d_auto)
+                _week_auto_done += d_auto_done
+                is_today = (d_str == today_str)
+                _border = "border:2px solid #1e88e5;" if is_today else "border:1px solid #e0e0e0;"
+                _bg = "background:#e3f2fd;" if is_today else "background:#fafafa;"
+                _day_label = f'<b style="color:#1e88e5;">{dn} {d.day}일</b>' if is_today else f'{dn} {d.day}일'
+
+                with _day_cols[i]:
+                    _m_bar = ""
+                    if d_manual:
+                        _m_pct = int(d_manual_done / len(d_manual) * 100)
+                        _m_bar = f'<div style="font-size:0.75rem; color:#1565c0;">📋 {d_manual_done}/{len(d_manual)}</div>'
+                    _a_bar = ""
+                    if d_auto:
+                        _a_pct = int(d_auto_done / len(d_auto) * 100)
+                        _a_clr = "#4caf50" if _a_pct >= 80 else "#ff9800" if _a_pct >= 40 else "#ef5350"
+                        _a_bar = f'<div style="font-size:0.75rem; color:{_a_clr};">🔴 {d_auto_done}/{len(d_auto)}</div>'
+                    _empty = '<div style="font-size:0.72rem; opacity:0.3; text-align:center;">—</div>' if not d_manual and not d_auto else ""
+                    st.markdown(f"""
+                    <div style="{_border} {_bg} border-radius:8px; padding:0.4rem; text-align:center; min-height:70px;">
+                        <div style="font-size:0.82rem; margin-bottom:4px;">{_day_label}</div>
+                        {_m_bar}{_a_bar}{_empty}
+                    </div>""", unsafe_allow_html=True)
+
+            # ── 3. 주간 요약 KPI ──
+            st.markdown("")
+            _kpi_c1, _kpi_c2, _kpi_c3 = st.columns(3)
+            _wm_pct = int(_week_manual_done / _week_manual_total * 100) if _week_manual_total else 0
+            _wa_pct = int(_week_auto_done / _week_auto_total * 100) if _week_auto_total else 0
+
+            # 지난주 대비 계산
+            _prev_mon = mon - timedelta(days=7)
+            _prev_week_auto_total = 0
+            _prev_week_auto_done = 0
+            for pi in range(5):
+                pd = _prev_mon + timedelta(days=pi)
+                pd_str = pd.strftime("%Y-%m-%d")
+                pd_tasks = [t for t in all_tasks if t.get("due") == pd_str and t.get("auto")]
+                _prev_week_auto_total += len(pd_tasks)
+                _prev_week_auto_done += sum(1 for t in pd_tasks if t.get("done"))
+            _prev_pct = int(_prev_week_auto_done / _prev_week_auto_total * 100) if _prev_week_auto_total else 0
+            _trend_diff = _wa_pct - _prev_pct
+            _trend_icon = "▲" if _trend_diff > 0 else "▼" if _trend_diff < 0 else "—"
+            _trend_color = "#4caf50" if _trend_diff > 0 else "#ef5350" if _trend_diff < 0 else "#999"
+
+            with _kpi_c1:
+                st.markdown(f"""
+                <div style="background:#e8f5e9; border-radius:10px; padding:0.6rem; text-align:center;">
+                    <div style="font-size:0.78rem; color:#388e3c;">📋 수동 업무 달성</div>
+                    <div style="font-size:1.3rem; font-weight:800; color:#2e7d32;">{_wm_pct}%</div>
+                    <div style="font-size:0.75rem; color:#66bb6a;">{_week_manual_done}/{_week_manual_total}건</div>
+                </div>""", unsafe_allow_html=True)
+            with _kpi_c2:
+                st.markdown(f"""
+                <div style="background:#fff3e0; border-radius:10px; padding:0.6rem; text-align:center;">
+                    <div style="font-size:0.78rem; color:#e65100;">🔴 긴급대응 완료율</div>
+                    <div style="font-size:1.3rem; font-weight:800; color:#ef6c00;">{_wa_pct}%</div>
+                    <div style="font-size:0.75rem; color:#ffa726;">{_week_auto_done}/{_week_auto_total}건</div>
+                </div>""", unsafe_allow_html=True)
+            with _kpi_c3:
+                st.markdown(f"""
+                <div style="background:#f3e5f5; border-radius:10px; padding:0.6rem; text-align:center;">
+                    <div style="font-size:0.78rem; color:#7b1fa2;">📈 지난주 대비</div>
+                    <div style="font-size:1.3rem; font-weight:800; color:{_trend_color};">{_trend_icon} {abs(_trend_diff)}%p</div>
+                    <div style="font-size:0.75rem; color:#9c27b0;">대응률 변화</div>
+                </div>""", unsafe_allow_html=True)
+
+            # ── 4. 수동 업무 추가 ──
+            st.markdown("---")
+            with st.expander("➕ 주간 업무 추가"):
+                with st.form("add_weekly_form", clear_on_submit=True):
+                    wc1, wc2, wc3, wc4 = st.columns([4, 2, 2, 2])
+                    with wc1:
+                        w_title = st.text_input("업무 제목", placeholder="주간 업무 내용...", key="weekly_title")
+                    with wc2:
+                        w_due = st.date_input("마감일", value=now, key="weekly_due")
+                    with wc3:
+                        w_priority = st.selectbox("우선순위", ["normal", "urgent", "routine"], format_func=lambda x: {"urgent": "긴급", "normal": "일반", "routine": "정기"}[x], key="weekly_pri")
+                    with wc4:
+                        w_writer = st.selectbox("작성자", ["MD", "CS", "CEO", "기타"], key="weekly_writer")
+                    w_sub = st.form_submit_button("💾 주간 업무 추가", width="stretch")
+                    if w_sub and w_title.strip():
+                        add_task(w_title.strip(), task_type="weekly", priority=w_priority, due=w_due.strftime("%Y-%m-%d"), writer=w_writer)
+                        st.success("주간 업무가 추가되었습니다!")
+                        st.rerun()
+
+        # ══════════════════════════════════════
+        # 월간 운영 뷰
+        # ══════════════════════════════════════
         with sub_tab_m:
             cal_year = now.year
             cal_month = now.month
-            st.markdown(f"### {cal_year}년 {cal_month}월")
+            month_key = f"{cal_year}-{cal_month:02d}"
+            _mg_data = load_json(MONTHLY_GOALS_FILE, {"months": {}})
+            _this_month = _mg_data.get("months", {}).get(month_key, {"goals": []})
+            _month_goals = _this_month.get("goals", [])
+
+            # ── 1. 월간 목표 ──
+            _days_in_month = calendar.monthrange(cal_year, cal_month)[1]
+            _day_progress = now.day / _days_in_month * 100
+
+            st.markdown(f"""
+            <div style="background:linear-gradient(135deg,#fce4ec,#f3e5f5); border-radius:12px; padding:1rem 1.2rem; margin-bottom:1rem;">
+                <div style="display:flex; justify-content:space-between; align-items:center;">
+                    <div style="font-size:1.1rem; font-weight:700; color:#ad1457;">🏆 {cal_year}년 {cal_month}월 목표</div>
+                    <div style="font-size:0.82rem; color:#8e24aa;">진행일: {now.day}/{_days_in_month}일 ({_day_progress:.0f}%)</div>
+                </div>
+            </div>
+            """, unsafe_allow_html=True)
+
+            _mg_changed = False
+            if _month_goals:
+                for mi, mg in enumerate(_month_goals):
+                    _mg_done = mg.get("done", False)
+                    _mg_icon = "✅" if _mg_done else "⬜"
+                    _mg_style = "text-decoration:line-through; opacity:0.6;" if _mg_done else ""
+                    _mg_cat = mg.get("category", "")
+                    _cat_badge = f'<span style="font-size:0.7rem; background:#fce4ec; color:#c62828; padding:1px 5px; border-radius:3px; margin-right:4px;">{_mg_cat}</span>' if _mg_cat else ""
+                    mgc1, mgc2 = st.columns([9, 1])
+                    with mgc1:
+                        st.markdown(f'<div style="font-size:0.92rem; padding:4px 0; {_mg_style}">{_mg_icon} {_cat_badge}{mg.get("title","")}</div>', unsafe_allow_html=True)
+                    with mgc2:
+                        if st.button("✓" if not _mg_done else "↩", key=f"mg_tog_{mi}"):
+                            _month_goals[mi]["done"] = not _mg_done
+                            _mg_changed = True
+            else:
+                st.caption("등록된 월간 목표가 없습니다.")
+
+            with st.expander("➕ 월간 목표 추가", expanded=not bool(_month_goals)):
+                with st.form("add_month_goal_form", clear_on_submit=True):
+                    _mgf_c1, _mgf_c2 = st.columns([5, 2])
+                    with _mgf_c1:
+                        _mg_title = st.text_input("목표", placeholder="예: 월 매출 5,000만원 달성", key="_mg_title")
+                    with _mgf_c2:
+                        _mg_cat = st.selectbox("카테고리", ["매출", "상품관리", "마케팅", "재발굴", "CS", "기타"], key="_mg_cat")
+                    _mg_sub = st.form_submit_button("🏆 목표 추가", width="stretch")
+                    if _mg_sub and _mg_title.strip():
+                        _month_goals.append({"title": _mg_title.strip(), "category": _mg_cat, "done": False})
+                        _mg_changed = True
+
+            if _mg_changed:
+                _mg_data.setdefault("months", {})[month_key] = {"goals": _month_goals}
+                save_json(MONTHLY_GOALS_FILE, _mg_data)
+                st.rerun()
+
+            st.markdown("---")
+
+            # ── 2. 히트맵 캘린더 ──
+            st.markdown('<div style="font-size:1rem; font-weight:700; margin-bottom:0.5rem;">📅 업무 밀도 캘린더</div>', unsafe_allow_html=True)
 
             day_headers = ["월", "화", "수", "목", "금", "토", "일"]
             header_html = "".join(f'<div class="cal-header">{d}</div>' for d in day_headers)
@@ -4617,49 +4809,82 @@ elif current_page == "daily_log":
                     else:
                         d_str = f"{cal_year}-{cal_month:02d}-{day_num:02d}"
                         d_tasks = [t for t in all_tasks if t.get("due") == d_str]
+                        d_done = sum(1 for t in d_tasks if t.get("done"))
                         count = len(d_tasks)
                         cls = "cal-cell"
                         if d_str == today_str:
                             cls += " today"
-                        if count > 0:
-                            cls += " has-tasks"
-                        dot = f'<br><span class="task-dot"></span> <span style="font-size:0.65rem;">{count}</span>' if count > 0 else ""
-                        cells_html += f'<div class="{cls}">{day_num}{dot}</div>'
+                        # 히트맵 색상
+                        if count == 0:
+                            _cell_bg = ""
+                        elif count < 10:
+                            _cell_bg = "background:#e8f5e9;"
+                        elif count < 50:
+                            _cell_bg = "background:#fff9c4;"
+                        elif count < 100:
+                            _cell_bg = "background:#ffe0b2;"
+                        else:
+                            _cell_bg = "background:#ffcdd2;"
+                        _done_txt = f'<div style="font-size:0.6rem; color:#4caf50;">✓{d_done}</div>' if d_done > 0 else ""
+                        _count_txt = f'<div style="font-size:0.62rem; color:#666;">{count}</div>' if count > 0 else ""
+                        cells_html += f'<div class="{cls}" style="{_cell_bg}">{day_num}{_count_txt}{_done_txt}</div>'
 
             st.markdown(f'<div class="cal-grid">{header_html}{cells_html}</div>', unsafe_allow_html=True)
 
-            # 날짜 선택 → 해당 날짜 업무 표시
-            sel_day = st.number_input("날짜 선택 (일)", min_value=1, max_value=calendar.monthrange(cal_year, cal_month)[1], value=now.day, key="cal_day_sel")
-            sel_date_str = f"{cal_year}-{cal_month:02d}-{int(sel_day):02d}"
-            sel_tasks = [t for t in all_tasks if t.get("due") == sel_date_str]
-            if sel_tasks:
-                st.markdown(f"**{sel_date_str} 업무 ({len(sel_tasks)}건)**")
-                for t in sel_tasks:
-                    pr = t.get("priority", "normal")
-                    pr_label = {"urgent": "긴급", "normal": "일반", "routine": "정기"}.get(pr, "일반")
-                    done_mark = "\u2705" if t.get("done") else "\u2b1c"
-                    st.markdown(f'{done_mark} `{pr_label}` {t["title"]}')
-            else:
-                st.caption(f"{sel_date_str} — 등록된 업무 없음")
-
-            # 월간 업무 추가
             st.markdown("---")
-            st.markdown("**\u2795 월간 업무 추가**")
-            with st.form("add_monthly_form", clear_on_submit=True):
-                mc1, mc2, mc3, mc4 = st.columns([4, 2, 2, 2])
-                with mc1:
-                    m_title = st.text_input("업무 제목", placeholder="월간 업무 내용...", key="monthly_title")
-                with mc2:
-                    m_due = st.date_input("마감일", value=now, key="monthly_due")
-                with mc3:
-                    m_priority = st.selectbox("우선순위", ["normal", "urgent", "routine"], format_func=lambda x: {"urgent": "긴급", "normal": "일반", "routine": "정기"}[x], key="monthly_pri")
-                with mc4:
-                    m_writer = st.selectbox("작성자", ["MD", "CS", "CEO", "기타"], key="monthly_writer")
-                m_sub = st.form_submit_button("\U0001f4be 월간 업무 추가", width="stretch")
-                if m_sub and m_title.strip():
-                    add_task(m_title.strip(), task_type="monthly", priority=m_priority, due=m_due.strftime("%Y-%m-%d"), writer=m_writer)
-                    st.success("월간 업무가 추가되었습니다!")
-                    st.rerun()
+
+            # ── 3. 주차별 트렌드 ──
+            st.markdown('<div style="font-size:1rem; font-weight:700; margin-bottom:0.5rem;">📈 주차별 완료율 트렌드</div>', unsafe_allow_html=True)
+
+            _week_trends_html = '<div style="display:flex; gap:0.5rem;">'
+            for wi in range(4):
+                _ws = mon - timedelta(days=weekday_idx) + timedelta(weeks=wi - (now.day // 7))
+                # 이번달 주차별 계산
+                _w_start = datetime(cal_year, cal_month, max(1, wi * 7 + 1), tzinfo=KST)
+                _w_end_day = min((wi + 1) * 7, _days_in_month)
+                _w_total = 0
+                _w_done = 0
+                for wd in range(wi * 7 + 1, _w_end_day + 1):
+                    wd_str = f"{cal_year}-{cal_month:02d}-{wd:02d}"
+                    wd_tasks = [t for t in all_tasks if t.get("due") == wd_str]
+                    _w_total += len(wd_tasks)
+                    _w_done += sum(1 for t in wd_tasks if t.get("done"))
+                _w_pct = int(_w_done / _w_total * 100) if _w_total else 0
+                _w_bar_h = max(4, _w_pct * 0.6)
+                _w_clr = "#4caf50" if _w_pct >= 60 else "#ff9800" if _w_pct >= 30 else "#ef5350" if _w_total > 0 else "#e0e0e0"
+                _w_label = f"W{wi+1}"
+                _is_current = (wi * 7 < now.day <= (wi + 1) * 7)
+                _w_border = "border:2px solid #1565c0; border-radius:8px;" if _is_current else ""
+                _week_trends_html += f"""
+                <div style="flex:1; text-align:center; padding:0.4rem; {_w_border}">
+                    <div style="font-size:0.78rem; font-weight:600; color:#333;">{_w_label}</div>
+                    <div style="background:#eee; border-radius:4px; height:60px; display:flex; align-items:flex-end; justify-content:center; margin:4px 0;">
+                        <div style="background:{_w_clr}; width:70%; height:{_w_bar_h}px; border-radius:3px;"></div>
+                    </div>
+                    <div style="font-size:0.82rem; font-weight:700; color:{_w_clr};">{_w_pct}%</div>
+                    <div style="font-size:0.68rem; color:#999;">{_w_done}/{_w_total}</div>
+                </div>"""
+            _week_trends_html += '</div>'
+            st.markdown(_week_trends_html, unsafe_allow_html=True)
+
+            # ── 4. 월간 업무 추가 ──
+            st.markdown("---")
+            with st.expander("➕ 월간 업무 추가"):
+                with st.form("add_monthly_form", clear_on_submit=True):
+                    mc1, mc2, mc3, mc4 = st.columns([4, 2, 2, 2])
+                    with mc1:
+                        m_title = st.text_input("업무 제목", placeholder="월간 업무 내용...", key="monthly_title")
+                    with mc2:
+                        m_due = st.date_input("마감일", value=now, key="monthly_due")
+                    with mc3:
+                        m_priority = st.selectbox("우선순위", ["normal", "urgent", "routine"], format_func=lambda x: {"urgent": "긴급", "normal": "일반", "routine": "정기"}[x], key="monthly_pri")
+                    with mc4:
+                        m_writer = st.selectbox("작성자", ["MD", "CS", "CEO", "기타"], key="monthly_writer")
+                    m_sub = st.form_submit_button("💾 월간 업무 추가", width="stretch")
+                    if m_sub and m_title.strip():
+                        add_task(m_title.strip(), task_type="monthly", priority=m_priority, due=m_due.strftime("%Y-%m-%d"), writer=m_writer)
+                        st.success("월간 업무가 추가되었습니다!")
+                        st.rerun()
 
     # ════════════════════════════════════════════
     # Tab 3: 공유 메모
