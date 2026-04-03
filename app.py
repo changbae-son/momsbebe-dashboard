@@ -2004,7 +2004,7 @@ def build_shop_url(shop_name: str, shop_product_id: str) -> str:
         if "맘스베베" in shop_name:
             return f"https://smartstore.naver.com/momsbebe/products/{shop_product_id}"
         elif "키니비니" in shop_name:
-            return f"https://smartstore.naver.com/kinibini/products/{shop_product_id}"
+            return f"https://smartstore.naver.com/kinibini1/products/{shop_product_id}"
         elif "키니공식" in shop_name:
             return f"https://smartstore.naver.com/kinibini_official/products/{shop_product_id}"
         return f"https://smartstore.naver.com/main/products/{shop_product_id}"
