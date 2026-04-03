@@ -2731,9 +2731,7 @@ def show_price_check_dialog():
         _target = _min_p - 100
         st.warning(f"우리 매장 미노출 — 가격 {_target:,}원 이하 설정 또는 키워드 최적화로 상위 진입 필요.")
 
-    st.caption(f"※ 네이버 쇼핑 검색 기준 | 검색어: {_res['keyword']} | 상위 {_total}개 상품")
-    st.link_button("🔗 가격 모니터링 전체 보기", "#",
-                   help="더 자세한 분석은 사이드바 '가격 모니터링' 탭에서 확인하세요.")
+    st.caption(f"※ 네이버 쇼핑 검색 기준 | 검색어: {_res['keyword']} | 상위 {_total}개 상품 | 더 자세한 분석은 사이드바 '가격 모니터링' 탭 이용")
 
 
 ACTION_TYPES = {
