@@ -2127,6 +2127,369 @@ def show_product_pages_dialog():
         st.info("등록된 상품페이지 URL이 없습니다.")
 
 
+# ─────────────────────────────────────────────
+# 📝 상세페이지 CTA 자동 분석 (논문 기반 PDP 프레임워크)
+# 참조: PDP_Design_632-643, 이커머스 구매 전환율 최적화 방안 연구,
+#        상세페이지 리디자인 마스터 프롬프트 (카테고리 무관)
+# ─────────────────────────────────────────────
+
+def _detect_platform(url: str) -> str:
+    if "smartstore.naver.com" in url:   return "스마트스토어"
+    if "coupang.com" in url:            return "쿠팡"
+    if "11st.co.kr" in url:             return "11번가"
+    if "gmarket.co.kr" in url:          return "G마켓"
+    if "auction.co.kr" in url:          return "옥션"
+    if "interpark.com" in url:          return "인터파크"
+    if "lotteon.com" in url:            return "롯데온"
+    if "toss.im" in url or "commerce.toss" in url: return "토스"
+    if "kakao" in url:                  return "카카오"
+    if "wemakeprice.com" in url:        return "위메프"
+    if "timon.com" in url:              return "티몬"
+    return "기타"
+
+
+def _parse_pdp_html(url: str) -> dict:
+    """상품 상세페이지 HTML 파싱 → CTA 분석 데이터 추출."""
+    import re, json as _json
+    result = {"url": url, "platform": _detect_platform(url), "error": None}
+    try:
+        _headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+            "Accept-Language": "ko-KR,ko;q=0.9,en-US;q=0.8",
+            "Referer": "https://www.google.com/",
+        }
+        _resp = requests.get(url, headers=_headers, timeout=12, allow_redirects=True)
+        _resp.encoding = _resp.apparent_encoding or "utf-8"
+        html = _resp.text
+    except Exception as _e:
+        result["error"] = str(_e)
+        return result
+
+    from bs4 import BeautifulSoup
+    soup = BeautifulSoup(html, "html.parser")
+
+    # ── 1) og: 메타 태그 ──
+    for _prop in ["og:title", "og:description", "og:image"]:
+        _tag = soup.find("meta", property=_prop)
+        result[_prop.replace(":", "_")] = (_tag.get("content", "").strip() if _tag else "")
+
+    # ── 2) JSON-LD 구조화 데이터 ──
+    _jsonld = None
+    for _scr in soup.find_all("script", type="application/ld+json"):
+        try:
+            _d = _json.loads(_scr.string or "")
+            if isinstance(_d, list): _d = _d[0]
+            if isinstance(_d, dict) and _d.get("@type") in ["Product", "ItemPage", "Offer"]:
+                _jsonld = _d; break
+        except Exception: pass
+    result["jsonld"] = _jsonld
+
+    # ── 3) 가격 정보 (앵커링 감지) ──
+    _pi = {"sale_price": None, "original_price": None, "discount_rate": None, "has_anchor": False}
+    if _jsonld:
+        _offers = _jsonld.get("offers") or _jsonld.get("Offers") or {}
+        if isinstance(_offers, dict):
+            _pi["sale_price"] = _offers.get("price") or _offers.get("lowPrice")
+            _pi["original_price"] = _offers.get("highPrice")
+    # HTML 상단 가격 패턴 탐색
+    _price_texts = re.findall(r'[\d,]{4,}', html[:8000])
+    _prices_num = sorted(set(int(t.replace(",", "")) for t in _price_texts if 100 < int(t.replace(",", "")) < 10_000_000), reverse=True)
+    if len(_prices_num) >= 2:
+        _pi["original_price"] = _pi["original_price"] or _prices_num[0]
+        _pi["sale_price"] = _pi["sale_price"] or _prices_num[-1]
+        try:
+            _disc = round((1 - _prices_num[-1] / _prices_num[0]) * 100)
+            if 1 <= _disc <= 90:
+                _pi["discount_rate"] = _disc
+                _pi["has_anchor"] = True
+        except Exception: pass
+    elif _prices_num:
+        _pi["sale_price"] = _pi["sale_price"] or _prices_num[0]
+    result["price_info"] = _pi
+
+    # ── 4) 이미지 개수 ──
+    _imgs = [i for i in soup.find_all("img")
+             if i.get("src") and not any(x in i.get("src","").lower() for x in ["logo","icon","btn","banner","pixel","1x1"])]
+    result["image_count"] = len(_imgs)
+
+    # ── 5) 리뷰·평점 ──
+    _ri = {"count": 0, "rating": None}
+    if _jsonld:
+        _agg = _jsonld.get("aggregateRating", {})
+        if _agg:
+            try: _ri["rating"] = float(_agg.get("ratingValue", 0) or 0)
+            except Exception: pass
+            try: _ri["count"] = int(_agg.get("reviewCount", 0) or _agg.get("ratingCount", 0) or 0)
+            except Exception: pass
+    for _pat in [r'리뷰\s*(\d[\d,]+)', r'후기\s*(\d[\d,]+)', r'(\d[\d,]+)\s*(?:개)?\s*리뷰', r'(\d[\d,]+)\s*건']:
+        _m = re.search(_pat, html)
+        if _m:
+            try:
+                _cnt = int(re.sub(r'[^\d]', '', _m.group(1)))
+                if _cnt > _ri["count"]: _ri["count"] = _cnt
+            except Exception: pass
+    if not _ri["rating"]:
+        _rm = re.search(r'(\d\.\d)\s*[/점]?\s*(?:5|10)', html)
+        if _rm:
+            try: _ri["rating"] = float(_rm.group(1))
+            except Exception: pass
+    result["review_info"] = _ri
+
+    # ── 6) 옵션 (색상/사이즈 등) ──
+    result["option_count"] = sum(1 for s in soup.find_all("select") if len(s.find_all("option")) > 2)
+
+    # ── 7) CTA 버튼 ──
+    _cta_kw = ["구매하기", "바로구매", "장바구니", "지금구매", "주문하기", "구매", "add to cart", "buy now"]
+    result["has_cta_button"] = any(kw in html for kw in _cta_kw)
+
+    # ── 8) 프로모션 신호 ──
+    _promo_kw = ["쿠폰", "할인", "타임세일", "특가", "최저가", "이벤트", "혜택", "증정", "포인트적립"]
+    result["promo_signals"] = sum(1 for kw in _promo_kw if kw in html)
+    result["has_promotions"] = result["promo_signals"] >= 2
+
+    # ── 9) 긴급성/재고 앵커 ──
+    _urgency_kw = ["품절임박", "재고부족", "한정수량", "마감", "오늘까지", "한정판", "품절"]
+    result["has_urgency"] = any(kw in html for kw in _urgency_kw)
+
+    # ── 10) 사회적 증명 ──
+    _social_kw = ["구매후기", "만족", "추천", "베스트", "인기상품", "판매량", "구매자"]
+    result["social_proof_signals"] = sum(1 for kw in _social_kw if kw in html)
+
+    # ── 11) 본문 텍스트 길이 / 반품 정책 ──
+    result["description_length"] = len(soup.get_text(separator=" ", strip=True))
+    _policy_kw = ["반품", "교환", "환불", "A/S", "품질보증", "보증기간"]
+    result["has_return_policy"] = any(kw in html for kw in _policy_kw)
+    result["title_length"] = len(result.get("og_title", ""))
+    return result
+
+
+def _score_pdp(parsed: dict) -> dict:
+    """논문 기반 6개 카테고리 PDP 점수 계산 (각 0-10점).
+    A: 최초 3초 이해도  B: 문제 공감  C: USP 명확성
+    D: 신뢰/증거 설계   E: 스캔 UX   F: 제안/CTA 리듬
+    """
+    if parsed.get("error") and not parsed.get("og_title"):
+        _empty = {"score": 0, "issues": ["페이지 로딩 실패"], "good": []}
+        _labels = {"A": ("최초 3초 이해도","🎯"), "B": ("문제 공감/상황 적합성","💬"),
+                   "C": ("USP 명확성","💡"), "D": ("신뢰/증거 설계","⭐"),
+                   "E": ("스캔 UX/가독성","🖼️"), "F": ("제안/CTA 리듬","🛒")}
+        return {"error": parsed["error"], "total": 0,
+                "scores": {k: {"label": v[0], "icon": v[1], **_empty} for k, v in _labels.items()}}
+
+    _pi   = parsed.get("price_info", {})
+    _ri   = parsed.get("review_info", {})
+    _title = parsed.get("og_title", "")
+    _desc  = parsed.get("og_description", "")
+    _scores = {}
+
+    # ── A. 최초 3초 이해도 ──
+    a, ai, ag = 4, [], []
+    if _title:
+        a += 1
+        if len(_title) >= 15: a += 1; ag.append("상품명이 구체적으로 작성됨")
+        else: ai.append("타이틀이 짧음 — 15자 이상 핵심 키워드 포함 권장")
+    else: a -= 1; ai.append("og:title 없음 — 검색노출·첫인상 매우 취약")
+    if _pi.get("sale_price"): a += 2; ag.append("가격 정보 감지")
+    else: ai.append("첫 화면 가격 노출 불명확 — 즉시 노출 필요")
+    if parsed.get("has_cta_button"): a += 2; ag.append("CTA 버튼(구매하기/장바구니) 존재")
+    else: ai.append("CTA 버튼 미감지 — 구매 버튼 최상단 배치 필요 (논문: 68.2% 효과)")
+    _scores["A"] = {"label": "최초 3초 이해도", "icon": "🎯", "score": min(10, max(0, a)), "issues": ai, "good": ag}
+
+    # ── B. 문제 공감/상황 적합성 ──
+    b, bi, bg = 3, [], []
+    if _desc and len(_desc) >= 30: b += 2; bg.append("og:description 존재 — 공감 문구 노출")
+    else: bi.append("og:description 없거나 짧음 — '이런 분께 좋아요' 공감 문구 추가 권장")
+    if parsed.get("description_length", 0) >= 1500: b += 3; bg.append("상세 본문 내용 충분")
+    elif parsed.get("description_length", 0) >= 500: b += 1; bi.append("본문 텍스트 보강 권장 (1,500자 이상)")
+    else: bi.append("텍스트 콘텐츠 매우 부족 — 이미지+텍스트 혼합 구성 권장")
+    if parsed.get("has_return_policy"): b += 2; bg.append("반품/교환 정책 명시 — 구매 불안 해소")
+    else: bi.append("반품/환불 정책 미감지 — 구매 불안 요소 선제 해소 필요")
+    _scores["B"] = {"label": "문제 공감/상황 적합성", "icon": "💬", "score": min(10, max(0, b)), "issues": bi, "good": bg}
+
+    # ── C. USP 명확성 ──
+    c, ci, cg = 3, [], []
+    if len(_title) >= 20: c += 2; cg.append("타이틀에 상품 차별 특성 포함")
+    elif len(_title) >= 10: c += 1; ci.append("타이틀 USP 강화 권장 (브랜드+핵심 기능+타겟 포함)")
+    else: ci.append("타이틀이 너무 짧아 차별점 전달 불가")
+    if parsed.get("option_count", 0) >= 1: c += 2; cg.append(f"상품 옵션 {parsed['option_count']}종 감지")
+    else: ci.append("옵션(색상/사이즈) 미감지 — 선택 다양성 제공으로 전환율 향상 가능")
+    if _desc and len(_desc) >= 50: c += 3; cg.append("설명 문구에서 상품 특성 파악 가능")
+    else: ci.append("설명 문구에서 USP 파악 어려움 — 한 문장 핵심 가치 제안 필요")
+    _scores["C"] = {"label": "USP 명확성", "icon": "💡", "score": min(10, max(0, c)), "issues": ci, "good": cg}
+
+    # ── D. 신뢰/증거 설계 ──
+    d, di, dg = 1, [], []
+    _rc = _ri.get("count", 0); _rr = _ri.get("rating", 0)
+    if _rc >= 500:   d += 4; dg.append(f"리뷰 {_rc:,}건 — 매우 높은 신뢰도")
+    elif _rc >= 100: d += 3; dg.append(f"리뷰 {_rc:,}건 — 신뢰 수준 양호")
+    elif _rc >= 20:  d += 2; dg.append(f"리뷰 {_rc}건 존재"); di.append("리뷰 100건 이상 확보 권장")
+    elif _rc > 0:    d += 1; di.append(f"리뷰 {_rc}건 — 적음, 구매 후 리뷰 유도 이벤트 필요")
+    else:            di.append("리뷰 미감지 — 리뷰 수집 전략 최우선 과제 (논문: 신뢰요소 60.8% 영향)")
+    if _rr and _rr >= 4.5:   d += 3; dg.append(f"평점 {_rr}점 — 우수")
+    elif _rr and _rr >= 4.0: d += 2; dg.append(f"평점 {_rr}점 — 양호")
+    elif _rr and _rr >= 3.5: d += 1; di.append(f"평점 {_rr}점 — 품질 개선으로 4.0점 이상 목표")
+    elif _rr:                 di.append(f"평점 {_rr}점 — 낮음, 상품/서비스 근본 개선 필요")
+    if parsed.get("social_proof_signals", 0) >= 3: d += 2; dg.append("사회적 증명 신호(판매량/추천) 다수 감지")
+    else: di.append("판매량·만족도 등 사회적 증명 강화 권장")
+    _scores["D"] = {"label": "신뢰/증거 설계", "icon": "⭐", "score": min(10, max(0, d)), "issues": di, "good": dg}
+
+    # ── E. 스캔 UX/가독성 ──
+    e, ei, eg = 2, [], []
+    _ic = parsed.get("image_count", 0)
+    if _ic >= 10:  e += 4; eg.append(f"이미지 {_ic}장 — 풍부한 시각 정보")
+    elif _ic >= 6: e += 3; eg.append(f"이미지 {_ic}장 감지"); ei.append("10장 이상 권장 (다각도·사용 장면·비교)")
+    elif _ic >= 3: e += 2; ei.append(f"이미지 {_ic}장 — 추가 촬영 필요 (제품 활용 장면, 상세 컷 추가)")
+    elif _ic >= 1: e += 1; ei.append(f"이미지 {_ic}장 — 매우 부족, 전문 촬영 강력 권장")
+    else:          ei.append("이미지 미감지 (JS 렌더링이거나 이미지 없음 — 직접 페이지 확인 필요)")
+    if parsed.get("og_image"): e += 2; eg.append("대표 이미지(썸네일) 설정됨")
+    else: ei.append("대표 이미지 미설정 — SNS 공유·검색 결과 시 빈 이미지 노출")
+    if parsed.get("description_length", 0) >= 1000: e += 2; eg.append("본문 스캔 콘텐츠 충분")
+    else: ei.append("텍스트 콘텐츠 보강 필요 — 아이콘·불릿·강조 등 스캔 UX 최적화")
+    _scores["E"] = {"label": "스캔 UX/가독성", "icon": "🖼️", "score": min(10, max(0, e)), "issues": ei, "good": eg}
+
+    # ── F. 제안/CTA 리듬 ──
+    f, fi, fg = 2, [], []
+    if _pi.get("has_anchor") and (_pi.get("discount_rate") or 0) >= 5:
+        f += 3; fg.append(f"가격 앵커링 감지: {_pi.get('discount_rate')}% 할인 — 즉시 구매 유도")
+    elif _pi.get("sale_price"): f += 1; fi.append("할인율·정가 표시로 가격 앵커링 강화 권장 (논문: 72.1% 효과)")
+    else: fi.append("가격 앵커링(정가 대비 할인율 표시) 미감지 — 전환율에 직접 영향")
+    if parsed.get("has_promotions"): f += 2; fg.append("프로모션·쿠폰 신호 감지")
+    else: fi.append("쿠폰·묶음 할인·사은품 혜택 표시로 전환율 개선 가능")
+    if parsed.get("has_urgency"): f += 3; fg.append("긴급성(품절임박·한정) 앵커 감지 — 구매 결정 유도")
+    else: fi.append("재고 긴급성·시간제한 앵커 없음 — '품절임박/한정수량' 표시로 FOMO 자극 권장")
+    if parsed.get("has_cta_button"): f += 2; fg.append("CTA 버튼 존재")
+    else: fi.append("CTA 버튼 4회 이상 자연스럽게 배치 권장 (논문 기준)")
+    _scores["F"] = {"label": "제안/CTA 리듬", "icon": "🛒", "score": min(10, max(0, f)), "issues": fi, "good": fg}
+
+    # ── 종합 점수 (가중치: F>D>A>E>C>B) ──
+    _wt = {"A": 1.2, "B": 1.0, "C": 1.0, "D": 1.3, "E": 1.1, "F": 1.4}
+    _total = round(sum(_scores[k]["score"] * _wt[k] for k in _scores) / sum(_wt.values()), 1)
+    return {
+        "error": None, "total": _total, "scores": _scores,
+        "platform": parsed.get("platform", ""),
+        "title": parsed.get("og_title", ""),
+        "image": parsed.get("og_image", ""),
+        "price_info": _pi, "review_info": _ri,
+    }
+
+
+def _render_cta_scores(result: dict):
+    """CTA 분석 결과 렌더링 (다이얼로그 내부)."""
+    scored = result.get("result", {})
+    shop   = result.get("shop", "")
+    if scored.get("error") and scored.get("total", 0) == 0:
+        st.error(f"⚠️ 페이지 로딩 실패: {scored['error']}")
+        st.caption("방화벽·봇 차단으로 접근이 제한될 수 있습니다. 직접 페이지를 열어 수동 확인하세요.")
+        return
+    total  = scored.get("total", 0)
+    scores = scored.get("scores", {})
+    _color = "#2e7d32" if total >= 7 else "#f57c00" if total >= 5 else "#c62828"
+    _grade = "A+ (우수)" if total >= 8.5 else "A (양호)" if total >= 7 else "B (보통)" if total >= 5 else "C (개선 필요)" if total >= 3 else "D (즉시 개선)"
+    st.divider()
+    # 총점 배너
+    st.markdown(f"""
+    <div style="background:linear-gradient(135deg,#e3f2fd,#bbdefb);border-radius:10px;padding:0.8rem 1.2rem;
+                display:flex;align-items:center;gap:1.2rem;margin-bottom:0.6rem;">
+        <div style="font-size:2.2rem;font-weight:900;color:{_color};line-height:1;">
+            {total}<span style="font-size:0.9rem;color:#888;font-weight:400;">/10</span>
+        </div>
+        <div>
+            <div style="font-weight:700;font-size:0.95rem;color:#333;">{shop} · CTA 종합 점수</div>
+            <div style="font-size:0.82rem;color:{_color};font-weight:700;">{_grade}</div>
+            <div style="font-size:0.74rem;color:#888;">논문 기반 6개 카테고리 자동 분석</div>
+        </div>
+    </div>""", unsafe_allow_html=True)
+    # A~F 점수 카드 (2열)
+    _keys = list(scores.keys())
+    for _row in range(0, len(_keys), 2):
+        _cols = st.columns(2)
+        for _ci, _k in enumerate(_keys[_row:_row+2]):
+            _item = scores[_k]
+            _sc = _item["score"]
+            _bc = "#2e7d32" if _sc >= 7 else "#f57c00" if _sc >= 5 else "#c62828"
+            _bg = "#f1f8e9" if _sc >= 7 else "#fff3e0" if _sc >= 5 else "#ffebee"
+            with _cols[_ci]:
+                st.markdown(f"""
+                <div style="background:{_bg};border-left:4px solid {_bc};border-radius:6px;
+                            padding:0.5rem 0.7rem;margin-bottom:0.3rem;">
+                    <div style="font-size:0.72rem;color:#555;">{_item['icon']} {_k}. {_item['label']}</div>
+                    <div style="font-size:1.5rem;font-weight:800;color:{_bc};line-height:1.2;">
+                        {_sc}<span style="font-size:0.7rem;color:#999;font-weight:400;">/10</span>
+                    </div>
+                </div>""", unsafe_allow_html=True)
+    # 개선 포인트 (점수 낮은 순)
+    _all_issues = sorted(
+        [(scores[k]["score"], k, scores[k]["label"], issue)
+         for k in scores for issue in scores[k].get("issues", [])],
+        key=lambda x: x[0])
+    if _all_issues:
+        st.markdown("#### 🚨 전환율 블로킹 개선 포인트")
+        for _sc, _k, _lbl, _issue in _all_issues[:6]:
+            _ic = "🔴" if _sc <= 3 else "🟠" if _sc <= 5 else "🟡"
+            st.markdown(f"{_ic} **{_k}. {_lbl}** — {_issue}")
+    # 잘 된 점
+    _all_good = sorted(
+        [(scores[k]["score"], k, scores[k]["label"], g)
+         for k in scores for g in scores[k].get("good", [])],
+        key=lambda x: -x[0])
+    if _all_good:
+        with st.expander("✅ 현재 잘 되고 있는 점 (유지 권장)", expanded=False):
+            for _sc, _k, _lbl, _g in _all_good[:5]:
+                st.markdown(f"✅ **{_k}. {_lbl}** — {_g}")
+    st.caption("※ HTML 자동 파싱 기반 | JS 렌더링 요소는 수동 확인 필요 | PDP_Design_632-643·이커머스 CRO 논문 기반")
+
+
+@st.dialog("📝 상세페이지 CTA 분석", width="large")
+def show_page_analysis_dialog():
+    """상품재발굴용 상세페이지 CTA 자동 분석 팝업."""
+    data  = st.session_state.get("_product_pages_data", {})
+    pname = data.get("product_name", "")
+    brand = data.get("brand", "")
+    shops = data.get("shops", [])
+
+    st.markdown(f"**{brand}** | {pname}")
+    st.caption("판매처 상품페이지를 자동 분석하여 CTA 점수와 전환율 개선 포인트를 제시합니다.")
+
+    # URL 수집
+    _url_list = [{"shop": s["name"], "url": u, "qty": s.get("qty", 0)}
+                 for s in shops for u in s.get("urls", []) if u]
+
+    if not _url_list:
+        st.warning("⚠️ 조회된 판매처 URL이 없습니다. (최근 90일 판매 이력 없음)")
+        st.caption("아래에 URL을 직접 입력하여 분석할 수 있습니다.")
+        _manual = st.text_input("URL 직접 입력", placeholder="https://smartstore.naver.com/...")
+        if _manual:
+            _url_list = [{"shop": "직접 입력", "url": _manual, "qty": 0}]
+        else:
+            return
+
+    _disp = [f"{u['shop']}  {'· '+str(u['qty'])+'개 판매' if u['qty'] else ''}" for u in _url_list]
+    _sel_idx = st.selectbox("분석할 판매처 선택", range(len(_disp)),
+                            format_func=lambda i: _disp[i], key="_pdp_url_sel")
+    _selected = _url_list[_sel_idx]
+
+    _c1, _c2 = st.columns(2)
+    with _c1:
+        st.link_button("🔗 페이지 직접 열기", _selected["url"], use_container_width=True)
+    with _c2:
+        _do_analyze = st.button("🔍 CTA 분석 시작", type="primary", use_container_width=True)
+
+    if _do_analyze:
+        # 이전 결과 초기화
+        st.session_state.pop("_cta_last_result", None)
+        with st.spinner(f"📡 {_selected['shop']} 페이지 분석 중... (최대 15초)"):
+            _parsed = _parse_pdp_html(_selected["url"])
+            _scored = _score_pdp(_parsed)
+        st.session_state["_cta_last_result"] = {
+            "shop": _selected["shop"], "url": _selected["url"], "result": _scored
+        }
+
+    _result = st.session_state.get("_cta_last_result")
+    if _result and _result.get("url") == _selected["url"]:
+        _render_cta_scores(_result)
+
+
 ACTION_TYPES = {
     "price_change": "💰 가격 수정",
     "page_edit": "📝 상세페이지 수정",
@@ -2996,9 +3359,22 @@ if _pending_pages:
             st.toast(f"⚠️ 조회 오류: {e}")
     if _pages_data:
         st.session_state["_product_pages_data"] = _pages_data
-        show_product_pages_dialog()
+        if _pending_pages.get("source") == "slow_moving":
+            # 상품재발굴 → CTA 분석 다이얼로그
+            show_page_analysis_dialog()
+        else:
+            show_product_pages_dialog()
     else:
-        st.toast(f"⚠️ {_pending_pages['pname']}: 최근 {_lookup_days}일 주문 데이터 없음")
+        # URL 없어도 상품재발굴에서는 CTA 분석 다이얼로그 열기 (URL 직접 입력 가능)
+        if _pending_pages.get("source") == "slow_moving":
+            st.session_state["_product_pages_data"] = {
+                "product_name": _pending_pages.get("pname", ""),
+                "product_id": _pending_pages.get("pid", ""),
+                "brand": "", "shops": [],
+            }
+            show_page_analysis_dialog()
+        else:
+            st.toast(f"⚠️ {_pending_pages['pname']}: 최근 {_lookup_days}일 주문 데이터 없음")
 
 _pending_action = st.session_state.pop("_pending_action_dialog", None)
 if _pending_action:
@@ -5148,7 +5524,8 @@ elif current_page == "slow_moving":
                                             st.session_state["current_page"] = "price_monitor"
                                             st.session_state["_auto_price_keyword"] = _sn
                                         elif sel == "page":
-                                            st.session_state["_pending_product_pages"] = {"pid": _si, "pname": _sn, "avg_qty": 0, "days": 90}
+                                            # source="slow_moving" → show_page_analysis_dialog (CTA 분석)
+                                            st.session_state["_pending_product_pages"] = {"pid": _si, "pname": _sn, "avg_qty": 0, "days": 90, "source": "slow_moving"}
                                         elif sel == "detail":
                                             st.session_state["_pending_shop_detail"] = {"pid": _si, "pname": _sn, "avg_qty": 0, "days": 90}
                                     st.selectbox(
