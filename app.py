@@ -2601,6 +2601,141 @@ def show_page_analysis_dialog():
         _render_cta_scores(_result)
 
 
+# ─────────────────────────────────────────────
+# 💰 가격 확인 팝업 (상품재발굴 → 페이지 이동 없이 인라인 조회)
+# ─────────────────────────────────────────────
+
+@st.dialog("💰 실시간 가격 확인", width="large")
+def show_price_check_dialog():
+    """상품재발굴에서 페이지 이동 없이 바로 가격 경쟁력을 조회하는 팝업."""
+    _pdata = st.session_state.get("_price_check_data", {})
+    _kw    = _pdata.get("keyword", "")
+    _pname = _pdata.get("pname", "")
+
+    st.markdown(f"**{_pname}** — 네이버 쇼핑 실시간 가격 조회")
+
+    # 키워드 수정 가능
+    _c1, _c2 = st.columns([5, 1])
+    with _c1:
+        _search_kw = st.text_input("검색 키워드", value=_kw,
+                                   placeholder="검색 키워드 입력...",
+                                   label_visibility="collapsed",
+                                   key="_price_dlg_kw")
+    with _c2:
+        _search_btn = st.button("🔍 검색", type="primary", use_container_width=True, key="_price_dlg_btn")
+
+    # 다이얼로그 첫 진입 시 자동 검색 트리거
+    if "_price_dlg_searched" not in st.session_state:
+        st.session_state["_price_dlg_searched"] = False
+    if not st.session_state["_price_dlg_searched"] and _kw:
+        _search_btn = True
+
+    if _search_btn and _search_kw:
+        st.session_state["_price_dlg_searched"] = True
+        with st.spinner(f"'{_search_kw}' 가격 조회 중..."):
+            _df, _is_demo = search_products(_search_kw)
+        st.session_state["_price_dlg_result"] = {
+            "df": _df, "is_demo": _is_demo, "keyword": _search_kw
+        }
+
+    _res = st.session_state.get("_price_dlg_result")
+    if not _res:
+        return
+
+    _df      = _res["df"]
+    _is_demo = _res["is_demo"]
+
+    if _is_demo:
+        st.info("📌 데모 모드 — 네이버 API 등록 후 실제 데이터 조회 가능")
+
+    if _df.empty:
+        st.warning("검색 결과가 없습니다.")
+        return
+
+    # ── 가격 요약 KPI ──
+    _df["우리매장"] = _df["판매처"].apply(is_our_store)
+    _our_df  = _df[_df["우리매장"]].copy()
+    _comp_df = _df[~_df["우리매장"]].copy()
+    _min_p   = int(_df["가격(원)"].min())
+    _avg_p   = int(_df["가격(원)"].mean())
+    _max_p   = int(_df["가격(원)"].max())
+    _total   = len(_df)
+    _cheapest = _df.loc[_df["가격(원)"].idxmin()]
+
+    _k1, _k2, _k3, _k4 = st.columns(4)
+    _k1.metric("최저가", f"{_min_p:,}원", help=f"판매처: {_cheapest['판매처']}")
+    _k2.metric("평균가", f"{_avg_p:,}원", help=f"상위 {_total}개 기준")
+    _k3.metric("최고가", f"{_max_p:,}원")
+    _k4.metric("가격 편차", f"{_max_p - _min_p:,}원")
+
+    # ── 우리 매장 현황 ──
+    if not _our_df.empty:
+        st.markdown("#### 🏪 우리 매장")
+        for _, _row in _our_df.iterrows():
+            _rp    = int(_row["가격(원)"])
+            _rank  = int(_row["순위"])
+            _diff  = _rp - _avg_p
+            _diff_txt = f"평균 대비 {'▲' if _diff > 0 else '▼'} {abs(_diff):,}원 {'비쌈' if _diff > 0 else '저렴'}"
+            _diff_color = "#c62828" if _diff > 0 else "#2e7d32"
+            _link  = _row.get("링크", "#")
+            _link_btn = f' <a href="{_link}" target="_blank" style="font-size:0.72rem;background:#1e88e5;color:#fff;padding:2px 7px;border-radius:3px;text-decoration:none;">열기↗</a>' if _link and _link != "#" else ""
+            st.markdown(
+                f'<div style="background:#e8f5e9;border-left:4px solid #43a047;border-radius:6px;'
+                f'padding:0.5rem 0.9rem;margin-bottom:0.3rem;display:flex;align-items:center;gap:0.8rem;">'
+                f'<span style="font-size:1.3rem;font-weight:900;color:#2e7d32;">{_rank}위</span>'
+                f'<div style="flex:1;">'
+                f'<div style="font-size:0.8rem;font-weight:700;color:#1b5e20;">{_row["판매처"]}{_link_btn}</div>'
+                f'<div style="font-size:0.72rem;color:#555;">{_row["상품명"][:45]}</div>'
+                f'<div style="font-size:0.7rem;color:{_diff_color};font-weight:600;">{_diff_txt}</div>'
+                f'</div>'
+                f'<div style="font-size:1.4rem;font-weight:800;color:#1b5e20;">{_rp:,}원</div>'
+                f'</div>',
+                unsafe_allow_html=True)
+    else:
+        st.warning(f"⚠️ 상위 {_total}개 결과에서 우리 매장이 발견되지 않았습니다.")
+
+    # ── 경쟁사 상위 7개 ──
+    st.markdown("#### 🏷️ 경쟁사 가격 현황")
+    _top_comp = _comp_df.head(7) if not _comp_df.empty else _df.head(7)
+    for _, _row in _top_comp.iterrows():
+        _rp   = int(_row["가격(원)"])
+        _rank = int(_row["순위"])
+        _is_min = _rp == _min_p
+        _link = _row.get("링크", "#")
+        _link_btn = f' <a href="{_link}" target="_blank" style="font-size:0.7rem;background:#546e7a;color:#fff;padding:1px 5px;border-radius:3px;text-decoration:none;">↗</a>' if _link and _link != "#" else ""
+        _badge = ' <span style="font-size:0.65rem;background:#ff6f00;color:#fff;padding:1px 5px;border-radius:3px;">최저가</span>' if _is_min else ""
+        st.markdown(
+            f'<div style="display:flex;align-items:center;gap:0.6rem;padding:0.3rem 0.6rem;'
+            f'border-bottom:1px solid #f0f0f0;font-size:0.8rem;">'
+            f'<span style="color:#888;font-size:0.72rem;min-width:2rem;">{_rank}위</span>'
+            f'<span style="flex:1;color:#444;">{_row["판매처"]}{_link_btn}{_badge}</span>'
+            f'<span style="font-weight:700;color:#333;">{_rp:,}원</span>'
+            f'</div>',
+            unsafe_allow_html=True)
+
+    # ── 가격 포지셔닝 조언 ──
+    st.markdown("#### 💡 가격 포지셔닝")
+    if not _our_df.empty:
+        _our_p = int(_our_df.iloc[0]["가격(원)"])
+        _our_rank = int(_our_df.iloc[0]["순위"])
+        if _our_p <= _min_p:
+            st.success(f"✅ 현재 최저가 포지션 유지 중 ({_our_rank}위). 마진 여유가 있다면 소폭 인상도 검토 가능.")
+        elif _our_p <= _avg_p:
+            _gap = _avg_p - _our_p
+            st.info(f"ℹ️ 평균가보다 {_gap:,}원 저렴한 포지션 ({_our_rank}위). 현 가격 유지 또는 브랜드 강화로 차별화 권장.")
+        else:
+            _gap = _our_p - _avg_p
+            _target = _avg_p - 100
+            st.warning(f"⚠️ 평균가보다 {_gap:,}원 높음 ({_our_rank}위). 경쟁력 확보를 위해 {_target:,}원 이하 검토 또는 번들·쿠폰으로 실질가 낮추기 권장.")
+    else:
+        _target = _min_p - 100
+        st.warning(f"우리 매장 미노출 — 가격 {_target:,}원 이하 설정 또는 키워드 최적화로 상위 진입 필요.")
+
+    st.caption(f"※ 네이버 쇼핑 검색 기준 | 검색어: {_res['keyword']} | 상위 {_total}개 상품")
+    st.link_button("🔗 가격 모니터링 전체 보기", "#",
+                   help="더 자세한 분석은 사이드바 '가격 모니터링' 탭에서 확인하세요.")
+
+
 ACTION_TYPES = {
     "price_change": "💰 가격 수정",
     "page_edit": "📝 상세페이지 수정",
@@ -3493,6 +3628,14 @@ if _pending_action:
         st.session_state.pop(_stale_key, None)
     st.session_state["_action_dialog_data"] = _pending_action
     show_action_dialog()
+
+_pending_price = st.session_state.pop("_pending_price_check", None)
+if _pending_price:
+    # 다이얼로그 내부 상태 초기화 (새 상품 검색 시 이전 결과 제거)
+    st.session_state.pop("_price_dlg_result", None)
+    st.session_state.pop("_price_dlg_searched", None)
+    st.session_state["_price_check_data"] = _pending_price
+    show_price_check_dialog()
 
 
 # ─────────────────────────────────────────────
@@ -5632,8 +5775,8 @@ elif current_page == "slow_moving":
                                         sel = st.session_state.get(_sk, "select")
                                         st.session_state[_sk] = "select"
                                         if sel == "price":
-                                            st.session_state["current_page"] = "price_monitor"
-                                            st.session_state["_auto_price_keyword"] = _sn
+                                            # 페이지 이동 대신 팝업으로 처리 (상품재발굴 유지)
+                                            st.session_state["_pending_price_check"] = {"keyword": _sn, "pname": _sn}
                                         elif sel == "page":
                                             # source="slow_moving" → show_page_analysis_dialog (CTA 분석)
                                             st.session_state["_pending_product_pages"] = {"pid": _si, "pname": _sn, "avg_qty": 0, "days": 90, "source": "slow_moving"}
