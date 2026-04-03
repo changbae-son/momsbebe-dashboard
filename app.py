@@ -2177,43 +2177,50 @@ def show_action_dialog():
         st.rerun()
 
 
-def quick_shop_detail(pid: str, pname: str, avg_qty=0, today_shipped=None):
-    """업무 일지 등에서 바로 판매처 상세 팝업을 띄우는 헬퍼."""
+def quick_shop_detail(pid: str, pname: str, avg_qty=0, today_shipped=None, days=7):
+    """업무 일지 등에서 바로 판매처 상세 팝업을 띄우는 헬퍼.
+    days: 조회 기간 (기본 7일, 상품재발굴 등 부진상품은 90 전달)
+    """
     from datetime import timedelta as _td
     _today = datetime.now(KST)
-    dates = tuple((_today - _td(days=i)).strftime("%Y-%m-%d") for i in range(1, 8))
-    orders_map = fetch_orders_parallel(dates)
+    if days <= 7:
+        dates = tuple((_today - _td(days=i)).strftime("%Y-%m-%d") for i in range(1, days + 1))
+        orders_map = fetch_orders_parallel(dates)
+        all_orders = [o for _orders in orders_map.values() for o in _orders]
+    else:
+        _start = (_today - _td(days=days)).strftime("%Y-%m-%d")
+        _end = (_today - _td(days=1)).strftime("%Y-%m-%d")
+        all_orders = _fetch_orders_range(_start, _end)
     shop_list = fetch_shop_list()
     pid_shops: dict = {}
-    for d_str, orders in orders_map.items():
-        for o in orders:
-            shop_code = o.get("shop_id", "")
-            if not shop_code:
-                continue
-            shop_name = shop_list.get(shop_code, shop_code)
-            shop_pid = o.get("shop_product_id", "")
-            order_products = o.get("order_products", [])
-            if isinstance(order_products, list):
-                for op in order_products:
-                    if str(op.get("product_id", "")) != str(pid):
-                        continue
-                    qty = 1
-                    try:
-                        qty = int(float(str(op.get("qty", 1))))
-                    except (ValueError, TypeError):
-                        pass
-                    amount = 0
-                    try:
-                        amount = int(float(str(op.get("prd_amount", 0))))
-                    except (ValueError, TypeError):
-                        pass
-                    if shop_name not in pid_shops:
-                        pid_shops[shop_name] = {"qty": 0, "amount": 0, "order_count": 0, "shop_product_ids": set()}
-                    pid_shops[shop_name]["qty"] += qty
-                    pid_shops[shop_name]["amount"] += amount
-                    pid_shops[shop_name]["order_count"] += 1
-                    if shop_pid:
-                        pid_shops[shop_name]["shop_product_ids"].add(shop_pid)
+    for o in all_orders:
+        shop_code = o.get("shop_id", "")
+        if not shop_code:
+            continue
+        shop_name = shop_list.get(shop_code, shop_code)
+        shop_pid = o.get("shop_product_id", "")
+        order_products = o.get("order_products", [])
+        if isinstance(order_products, list):
+            for op in order_products:
+                if str(op.get("product_id", "")) != str(pid):
+                    continue
+                qty = 1
+                try:
+                    qty = int(float(str(op.get("qty", 1))))
+                except (ValueError, TypeError):
+                    pass
+                amount = 0
+                try:
+                    amount = int(float(str(op.get("prd_amount", 0))))
+                except (ValueError, TypeError):
+                    pass
+                if shop_name not in pid_shops:
+                    pid_shops[shop_name] = {"qty": 0, "amount": 0, "order_count": 0, "shop_product_ids": set()}
+                pid_shops[shop_name]["qty"] += qty
+                pid_shops[shop_name]["amount"] += amount
+                pid_shops[shop_name]["order_count"] += 1
+                if shop_pid:
+                    pid_shops[shop_name]["shop_product_ids"].add(shop_pid)
     if not pid_shops:
         return None
     sorted_shops = sorted(pid_shops.items(), key=lambda x: -x[1]["qty"])
@@ -2285,6 +2292,30 @@ def fetch_orders_parallel(date_strings: tuple) -> dict:
             except Exception:
                 results[date_str] = []
     return results
+
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def _fetch_orders_range(start_date: str, end_date: str) -> list:
+    """날짜 범위 주문 데이터 한번에 조회 (부진상품 등 장기 조회용, 1시간 캐시)."""
+    all_orders = []
+    for page in range(1, 300):
+        data = call_onewms_api("get_order_info", {
+            "type": "product",
+            "start_date": start_date,
+            "end_date": end_date,
+            "date_type": "order_date",
+            "limit": "100",
+            "page": str(page),
+        })
+        if not isinstance(data, dict) or data.get("error"):
+            break
+        orders = data.get("data", [])
+        if not orders:
+            break
+        all_orders.extend(orders)
+        if page * 100 >= int(data.get("total", 0)):
+            break
+    return all_orders
 
 
 with st.sidebar:
@@ -2927,43 +2958,47 @@ _pages_cache = st.session_state.setdefault("_product_pages_cache", {})
 
 _pending = st.session_state.pop("_pending_shop_detail", None)
 if _pending:
-    _cache_key = f"{_pending['pid']}_{_pending['pname']}"
+    _lookup_days = _pending.get("days", 7)
+    _cache_key = f"{_pending['pid']}_{_pending['pname']}_{_lookup_days}"
     if _cache_key in _shop_cache:
         _shop_data = _shop_cache[_cache_key]
     else:
+        _shop_data = None
         try:
-            with st.spinner(f"📡 {_pending['pname']} 판매처 조회 중..."):
-                _shop_data = quick_shop_detail(_pending["pid"], _pending["pname"], _pending.get("avg_qty", 0))
+            _spinner_msg = f"📡 {_pending['pname']} 판매처 조회 중... (최근 {_lookup_days}일)"
+            with st.spinner(_spinner_msg):
+                _shop_data = quick_shop_detail(_pending["pid"], _pending["pname"], _pending.get("avg_qty", 0), days=_lookup_days)
             if _shop_data:
                 _shop_cache[_cache_key] = _shop_data
         except Exception as e:
             st.toast(f"⚠️ 조회 오류: {e}")
-            _shop_data = None
     if _shop_data:
         st.session_state["_shop_detail_data"] = _shop_data
         show_shop_detail_dialog()
     else:
-        st.toast(f"{_pending['pname']}: 최근 7일 주문 데이터 없음")
+        st.toast(f"⚠️ {_pending['pname']}: 최근 {_lookup_days}일 주문 데이터 없음")
 
 _pending_pages = st.session_state.pop("_pending_product_pages", None)
 if _pending_pages:
-    _cache_key = f"{_pending_pages['pid']}_{_pending_pages['pname']}"
+    _lookup_days = _pending_pages.get("days", 7)
+    _cache_key = f"{_pending_pages['pid']}_{_pending_pages['pname']}_{_lookup_days}"
     if _cache_key in _pages_cache:
         _pages_data = _pages_cache[_cache_key]
     else:
+        _pages_data = None
         try:
-            with st.spinner(f"📡 {_pending_pages['pname']} 상품페이지 조회 중..."):
-                _pages_data = quick_shop_detail(_pending_pages["pid"], _pending_pages["pname"], _pending_pages.get("avg_qty", 0))
+            _spinner_msg = f"📡 {_pending_pages['pname']} 상품페이지 조회 중... (최근 {_lookup_days}일)"
+            with st.spinner(_spinner_msg):
+                _pages_data = quick_shop_detail(_pending_pages["pid"], _pending_pages["pname"], _pending_pages.get("avg_qty", 0), days=_lookup_days)
             if _pages_data:
                 _pages_cache[_cache_key] = _pages_data
         except Exception as e:
             st.toast(f"⚠️ 조회 오류: {e}")
-            _pages_data = None
     if _pages_data:
         st.session_state["_product_pages_data"] = _pages_data
         show_product_pages_dialog()
     else:
-        st.toast(f"{_pending_pages['pname']}: 최근 7일 주문 데이터 없음")
+        st.toast(f"⚠️ {_pending_pages['pname']}: 최근 {_lookup_days}일 주문 데이터 없음")
 
 _pending_action = st.session_state.pop("_pending_action_dialog", None)
 if _pending_action:
@@ -5113,9 +5148,9 @@ elif current_page == "slow_moving":
                                             st.session_state["current_page"] = "price_monitor"
                                             st.session_state["_auto_price_keyword"] = _sn
                                         elif sel == "page":
-                                            st.session_state["_pending_product_pages"] = {"pid": _si, "pname": _sn, "avg_qty": 0}
+                                            st.session_state["_pending_product_pages"] = {"pid": _si, "pname": _sn, "avg_qty": 0, "days": 90}
                                         elif sel == "detail":
-                                            st.session_state["_pending_shop_detail"] = {"pid": _si, "pname": _sn, "avg_qty": 0}
+                                            st.session_state["_pending_shop_detail"] = {"pid": _si, "pname": _sn, "avg_qty": 0, "days": 90}
                                     st.selectbox(
                                         "액션", options=list(_SLOW_ACTION_OPTIONS.keys()),
                                         format_func=lambda x: _SLOW_ACTION_OPTIONS[x],
