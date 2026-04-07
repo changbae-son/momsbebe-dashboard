@@ -1212,13 +1212,30 @@ def fetch_sales_insight() -> dict:
     for item in all_trans:
         product_daily[item["product_id"]][item["crdate"][:10]] += int(item.get("qty", 0))
 
-    # 오늘 출고 상품
+    # 오늘 출고 상품 (수량 포함)
     today_data = call_onewms_api("get_stock_tx_info", {"type": "product"})
     today_products = set()
+    today_qty_map = {}  # {product_id: 오늘출고수량}
     if isinstance(today_data, dict):
-        for pid, val in today_data.items():
-            if isinstance(val, dict):
-                today_products.add(pid)
+        for pid, warehouses in today_data.items():
+            if not isinstance(warehouses, dict):
+                continue
+            today_products.add(pid)
+            # 출고(trans) 수량 합산: {warehouse: [[{job, qty}, ...]]}
+            tq = 0
+            for wh_id, entries in warehouses.items():
+                if not isinstance(entries, list):
+                    continue
+                for entry_group in entries:
+                    if not isinstance(entry_group, list):
+                        continue
+                    for item in entry_group:
+                        if item.get("job") == "trans":
+                            try:
+                                tq += abs(int(float(str(item.get("qty", 0)))))
+                            except (ValueError, TypeError):
+                                pass
+            today_qty_map[pid] = tq if tq > 0 else 1  # 출고 기록이 있으면 최소 1
 
     # 송장 미출력 판단: 오늘 출고가 0이면 아직 송장을 뽑지 않은 상태
     today_shipped = len(today_products) > 0
@@ -1236,6 +1253,7 @@ def fetch_sales_insight() -> dict:
             "total_qty": total_qty,
             "avg_qty": round(avg_qty, 1),
             "today_shipped": pid in today_products,
+            "today_qty": today_qty_map.get(pid, 0),
         })
     daily_sellers.sort(key=lambda x: (-x["active_days"], -x["avg_qty"]))
 
@@ -4048,8 +4066,10 @@ elif current_page == "sales_inventory":
             }
 
         # ── 상품 리스트 렌더링 헬퍼 (4개 탭 공용) ──
-        def _render_product_list(products, tab_prefix, show_today_col=False):
-            """products: list of dict — 테이블 행 클릭 → 판매처 팝업"""
+        def _render_product_list(products, tab_prefix, show_today_col=False, show_today_qty=False):
+            """products: list of dict — 테이블 행 클릭 → 판매처 팝업
+            show_today_qty: True이면 '일평균' 대신 '오늘출고수량' 컬럼 표시
+            """
             if not products:
                 st.info("해당 상품이 없습니다.")
                 return
@@ -4063,13 +4083,18 @@ elif current_page == "sales_inventory":
                 name = product_names_map.get(pid, pid)
                 brand = extract_brand(name)
                 avg_qty = int(item.get("avg_qty", 0) or 0)
+                today_qty = int(item.get("today_qty", 0) or 0)
                 row = {
                     "브랜드": str(brand),
                     "상품코드": str(pid),
                     "상품명": str(name),
-                    "일평균": avg_qty,
-                    "출고일수": f"{item.get('active_days', 0)}/{item.get('total_days', 7)}일",
                 }
+                if show_today_qty:
+                    row["오늘출고수량"] = today_qty
+                    row["일평균"] = avg_qty
+                else:
+                    row["일평균"] = avg_qty
+                row["출고일수"] = f"{item.get('active_days', 0)}/{item.get('total_days', 7)}일"
                 if show_today_col:
                     row["오늘출고"] = "✅" if item.get("today_shipped") else "❌"
                 table_rows.append(row)
@@ -4078,14 +4103,18 @@ elif current_page == "sales_inventory":
 
             df = pd.DataFrame(table_rows)
             df["일평균"] = df["일평균"].astype(int)
+            if show_today_qty:
+                df["오늘출고수량"] = df["오늘출고수량"].astype(int)
 
             col_config = {
                 "브랜드": st.column_config.TextColumn("브랜드", width="small"),
                 "상품코드": st.column_config.TextColumn("상품코드", width="small"),
                 "상품명": st.column_config.TextColumn("상품명", width="large"),
-                "일평균": st.column_config.NumberColumn("일평균", format="%d개"),
-                "출고일수": st.column_config.TextColumn("출고일수", width="small"),
             }
+            if show_today_qty:
+                col_config["오늘출고수량"] = st.column_config.NumberColumn("오늘출고수량", format="%d개")
+            col_config["일평균"] = st.column_config.NumberColumn("일평균", format="%d개")
+            col_config["출고일수"] = st.column_config.TextColumn("출고일수", width="small")
             if show_today_col:
                 col_config["오늘출고"] = st.column_config.TextColumn("오늘출고", width="small")
 
@@ -4153,9 +4182,9 @@ elif current_page == "sales_inventory":
             _render_product_list(all_sorted, "tab_all", show_today_col=True)
 
         with tab_today:
-            shipped = sorted([s for s in daily_sellers if s["today_shipped"]], key=lambda x: -x["avg_qty"])
+            shipped = sorted([s for s in daily_sellers if s["today_shipped"]], key=lambda x: -x.get("today_qty", 0))
             if shipped:
-                _render_product_list(shipped, "tab_today")
+                _render_product_list(shipped, "tab_today", show_today_qty=True)
             else:
                 st.info("오늘 출고된 상품이 아직 없습니다.")
 
