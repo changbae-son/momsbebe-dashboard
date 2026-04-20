@@ -777,6 +777,53 @@ def get_price_history(keyword: str, days: int = 7) -> list:
     return items
 
 
+def compute_action_signals() -> dict:
+    """홈 Action Inbox용 — 로컬 JSON만 읽어 빠르게 신호 집계 (API 호출 없음)."""
+    today = datetime.now(KST).strftime("%Y-%m-%d")
+
+    # 1) 1위 빼앗긴 키워드 (가장 최근 스냅샷 기준)
+    ph = load_json(PRICE_HISTORY_FILE, {"history": []}).get("history", [])
+    latest_per_kw = {}
+    for h in ph:
+        k = h.get("keyword")
+        if not k:
+            continue
+        if k not in latest_per_kw or h.get("date","") > latest_per_kw[k].get("date",""):
+            latest_per_kw[k] = h
+    rank_lost = []
+    for k, snap in latest_per_kw.items():
+        ours = snap.get("our", [])
+        if ours and ours[0].get("rank", 99) > 1:
+            rank_lost.append({
+                "keyword": k,
+                "our_rank": ours[0]["rank"],
+                "our_price": ours[0]["price"],
+                "top1_price": snap.get("top1", {}).get("price", 0),
+                "date": snap.get("date", ""),
+            })
+    rank_lost.sort(key=lambda x: x["our_rank"])
+
+    # 2) 오늘 미완료 업무
+    tasks = load_json(TASKS_FILE, {"tasks": []}).get("tasks", [])
+    today_pending = [t for t in tasks if t.get("due") == today and not t.get("done")]
+
+    # 3) 7일 결과 확인 필요 사례
+    cases = load_json(CASES_FILE, {"cases": []}).get("cases", [])
+    pending_7d = [c for c in cases if c.get("outcome_7d") == "pending_check"]
+
+    # 4) 미발송 알림 (저용량 큐)
+    alerts = load_json(PENDING_ALERTS_FILE, {"alerts": []}).get("alerts", [])
+    queued = [a for a in alerts if a.get("queued_at", "").startswith(today)]
+
+    return {
+        "rank_lost":     rank_lost,
+        "today_pending": today_pending,
+        "pending_7d":    pending_7d,
+        "queued_alerts": queued,
+        "total":         len(rank_lost) + len(today_pending) + len(pending_7d),
+    }
+
+
 def find_similar_price_cases(keyword: str, limit: int = 5) -> list:
     """키워드와 매칭되는 과거 '가격 수정' 사례 (P-D)."""
     if not keyword:
@@ -3212,7 +3259,15 @@ with st.sidebar:
     st.caption("ShinA International 업무 대시보드")
     st.markdown("---")
 
-    # ── 메뉴 네비게이션 ──
+    # ── 메뉴 네비게이션 (알림 뱃지 포함) ──
+    _signals = compute_action_signals()
+    _badges = {
+        "dashboard":      _signals["total"],
+        "price_monitor":  len(_signals["rank_lost"]),
+        "daily_log":      len(_signals["today_pending"]) + len(_signals["pending_7d"]),
+        "sales_inventory": 0,
+        "slow_moving":    0,
+    }
     menu_items = {
         "📊 대시보드": "dashboard",
         "📦 판매대응 및 재고": "sales_inventory",
@@ -3227,7 +3282,9 @@ with st.sidebar:
     for label, page_id in menu_items.items():
         is_active = st.session_state.current_page == page_id
         btn_type = "primary" if is_active else "secondary"
-        if st.button(label, key=f"nav_{page_id}", width="stretch", type=btn_type):
+        _b = _badges.get(page_id, 0)
+        _label = f"{label}  🔴 {_b}" if _b > 0 else label
+        if st.button(_label, key=f"nav_{page_id}", width="stretch", type=btn_type):
             st.session_state.current_page = page_id
             st.rerun()
 
@@ -3928,6 +3985,44 @@ if _pending_price:
 # 📊 대시보드 (메인 요약 페이지)
 # ─────────────────────────────────────────────
 if current_page == "dashboard":
+    # ── 🚦 Action Inbox (홈 관제탑) ──
+    _sig = compute_action_signals()
+    if _sig["total"] > 0 or _sig["queued_alerts"]:
+        st.markdown('<div class="section-title"><span class="icon">🚦</span> Action Inbox — 지금 처리 필요</div>', unsafe_allow_html=True)
+        _inbox_cols = st.columns(4)
+        with _inbox_cols[0]:
+            n = len(_sig["rank_lost"])
+            color = "#ef5350" if n > 0 else "#bdbdbd"
+            st.markdown(f'<div style="background:linear-gradient(135deg,#fff5f5,#ffe8e8);border:1px solid #ffcdd2;border-radius:10px;padding:0.6rem;text-align:center;"><div style="font-size:0.7rem;color:#666;">📉 1위 빼앗긴 키워드</div><div style="font-size:1.4rem;font-weight:800;color:{color};">{n}</div><div style="font-size:0.65rem;color:#888;">가격 모니터링 탭</div></div>', unsafe_allow_html=True)
+        with _inbox_cols[1]:
+            n = len(_sig["today_pending"])
+            color = "#e65100" if n > 0 else "#bdbdbd"
+            st.markdown(f'<div style="background:linear-gradient(135deg,#fffbf0,#fff3e0);border:1px solid #ffe0b2;border-radius:10px;padding:0.6rem;text-align:center;"><div style="font-size:0.7rem;color:#666;">📝 오늘 미완료 업무</div><div style="font-size:1.4rem;font-weight:800;color:{color};">{n}</div><div style="font-size:0.65rem;color:#888;">업무 일지 탭</div></div>', unsafe_allow_html=True)
+        with _inbox_cols[2]:
+            n = len(_sig["pending_7d"])
+            color = "#5e35b1" if n > 0 else "#bdbdbd"
+            st.markdown(f'<div style="background:linear-gradient(135deg,#f3f0ff,#ede7f6);border:1px solid #d1c4e9;border-radius:10px;padding:0.6rem;text-align:center;"><div style="font-size:0.7rem;color:#666;">⏰ 7일 결과 확인</div><div style="font-size:1.4rem;font-weight:800;color:{color};">{n}</div><div style="font-size:0.65rem;color:#888;">사례 DB</div></div>', unsafe_allow_html=True)
+        with _inbox_cols[3]:
+            n = len(_sig["queued_alerts"])
+            color = "#1565c0" if n > 0 else "#bdbdbd"
+            st.markdown(f'<div style="background:linear-gradient(135deg,#f0f7ff,#e3f2fd);border:1px solid #bbdefb;border-radius:10px;padding:0.6rem;text-align:center;"><div style="font-size:0.7rem;color:#666;">🔔 오늘 큐 알림</div><div style="font-size:1.4rem;font-weight:800;color:{color};">{n}</div><div style="font-size:0.65rem;color:#888;">18시 일괄 발송</div></div>', unsafe_allow_html=True)
+
+        with st.expander("📋 처리 항목 상세 보기", expanded=False):
+            if _sig["rank_lost"]:
+                st.markdown("**📉 1위 빼앗긴 키워드 (최근 스냅샷 기준)**")
+                for r in _sig["rank_lost"][:10]:
+                    _diff = r["our_price"] - r["top1_price"]
+                    st.markdown(f'- `{r["keyword"]}` — 우리 {r["our_rank"]}위 {r["our_price"]:,}원 / 1위 {r["top1_price"]:,}원 (+{_diff:,}원) · {r["date"]}')
+            if _sig["today_pending"]:
+                st.markdown("**📝 오늘 미완료 업무**")
+                for t in _sig["today_pending"][:10]:
+                    st.markdown(f'- {t.get("title","(제목없음)")}')
+            if _sig["pending_7d"]:
+                st.markdown("**⏰ 7일 결과 확인 필요 사례**")
+                for c in _sig["pending_7d"][:10]:
+                    st.markdown(f'- {c.get("date","")} · {c.get("product_name","")} ({c.get("action_label","")})')
+        st.markdown("")
+
     # CEO 지시 사항
     ceo_data = load_json(CEO_MSG_FILE, {"message": "", "updated": ""})
     if ceo_data.get("message"):
