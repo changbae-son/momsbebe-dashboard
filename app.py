@@ -581,8 +581,58 @@ st.markdown("""
         background: rgba(255,154,0,0.08);
         font-weight: 600;
     }
+
+    /* ── 📱 모바일 반응형 (≤ 768px) ── */
+    @media (max-width: 768px) {
+        .block-container { padding: 0.5rem !important; max-width: 100% !important; }
+        .header-banner { padding: 1rem !important; flex-direction: column; text-align: center; }
+        .header-banner h1 { font-size: 1.2rem !important; }
+        .header-banner p { font-size: 0.8rem !important; }
+        [data-testid="column"] { width: 100% !important; flex: 0 0 100% !important; }
+        .stPlotlyChart { min-height: 240px; }
+        h1 { font-size: 1.3rem !important; }
+        h2 { font-size: 1.1rem !important; }
+        h3 { font-size: 1rem !important; }
+        .product-card, .our-store-row { font-size: 0.8rem !important; }
+        .section-title { font-size: 0.95rem !important; }
+        .ceo-strategy-box { padding: 1rem !important; }
+    }
 </style>
 """, unsafe_allow_html=True)
+
+# ─────────────────────────────────────────────
+# 🌙 다크모드 (세션 상태 기반)
+# ─────────────────────────────────────────────
+if "dark_mode" not in st.session_state:
+    st.session_state.dark_mode = False
+
+if st.session_state.dark_mode:
+    st.markdown("""
+    <style>
+        /* Streamlit 기본 배경 어둡게 */
+        .stApp { background: #1a1a1a !important; color: #e0e0e0 !important; }
+        [data-testid="stSidebar"] { background: #232323 !important; }
+        [data-testid="stSidebar"] * { color: #e0e0e0 !important; }
+        .block-container, .block-container * { color: #e0e0e0; }
+        /* 카드/박스류 톤다운 */
+        .product-card, .our-store-row, .review-card, .action-item,
+        .price-summary-item, .empty-state, .shipment-pending {
+            background: #2a2a2a !important; color: #e0e0e0 !important;
+            border-color: #3a3a3a !important;
+        }
+        .ceo-strategy-box { background: linear-gradient(135deg, #2d2645, #3a2d5a) !important; }
+        /* Plotly 배경은 transparent 유지 (이미 그렇게 설정됨) */
+        /* 입력창 */
+        .stTextInput input, .stTextArea textarea, .stSelectbox div[role="combobox"] {
+            background: #2a2a2a !important; color: #e0e0e0 !important; border-color: #444 !important;
+        }
+        /* 메트릭 */
+        [data-testid="stMetricValue"] { color: #fff !important; }
+        [data-testid="stMetricLabel"] { color: #bbb !important; }
+        /* expander */
+        .streamlit-expanderHeader { background: #2a2a2a !important; color: #e0e0e0 !important; }
+    </style>
+    """, unsafe_allow_html=True)
 
 # ─────────────────────────────────────────────
 # 데이터 저장 경로
@@ -3305,6 +3355,13 @@ with st.sidebar:
         st.caption("🔸 원싱크 — 미연동")
 
     st.markdown("---")
+
+    # ── 🌙 다크모드 토글 ──
+    _dm = st.toggle("🌙 다크모드", value=st.session_state.dark_mode, key="_dark_toggle")
+    if _dm != st.session_state.dark_mode:
+        st.session_state.dark_mode = _dm
+        st.rerun()
+
     now = datetime.now(KST)
     st.caption(f"📅 {now.strftime('%Y년 %m월 %d일')}  ⏰ {now.strftime('%H:%M')}")
 
