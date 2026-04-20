@@ -827,6 +827,25 @@ def get_price_history(keyword: str, days: int = 7) -> list:
     return items
 
 
+def get_global_period() -> tuple:
+    """사이드바 글로벌 기간 셀렉터의 (시작일, 종료일, 라벨) 반환."""
+    today = datetime.now(KST).date()
+    p = st.session_state.get("global_period", "7일")
+    if p == "오늘":
+        return (today, today, "오늘")
+    if p == "7일":
+        return (today - timedelta(days=6), today, "최근 7일")
+    if p == "30일":
+        return (today - timedelta(days=29), today, "최근 30일")
+    if p == "90일":
+        return (today - timedelta(days=89), today, "최근 90일")
+    if p == "사용자지정":
+        rng = st.session_state.get("global_period_custom", (today - timedelta(days=7), today))
+        if isinstance(rng, tuple) and len(rng) == 2:
+            return (rng[0], rng[1], f"{rng[0]} ~ {rng[1]}")
+    return (today - timedelta(days=6), today, "최근 7일")
+
+
 def compute_action_signals() -> dict:
     """홈 Action Inbox용 — 로컬 JSON만 읽어 빠르게 신호 집계 (API 호출 없음)."""
     today = datetime.now(KST).strftime("%Y-%m-%d")
@@ -3362,6 +3381,32 @@ with st.sidebar:
         st.session_state.dark_mode = _dm
         st.rerun()
 
+    # ── 📅 글로벌 기간 셀렉터 (U-3) ──
+    if "global_period" not in st.session_state:
+        st.session_state.global_period = "7일"
+    _period_opts = ["오늘", "7일", "30일", "90일", "사용자지정"]
+    _new_period = st.selectbox(
+        "📅 분석 기간",
+        _period_opts,
+        index=_period_opts.index(st.session_state.global_period),
+        key="_period_select",
+        help="모든 페이지의 차트·KPI에 적용됩니다.",
+    )
+    if _new_period != st.session_state.global_period:
+        st.session_state.global_period = _new_period
+        st.rerun()
+    if _new_period == "사용자지정":
+        _today = datetime.now(KST).date()
+        if "global_period_custom" not in st.session_state:
+            st.session_state.global_period_custom = (_today - timedelta(days=7), _today)
+        _rng = st.date_input(
+            "기간 선택",
+            value=st.session_state.global_period_custom,
+            key="_period_custom",
+        )
+        if isinstance(_rng, tuple) and len(_rng) == 2:
+            st.session_state.global_period_custom = _rng
+
     now = datetime.now(KST)
     st.caption(f"📅 {now.strftime('%Y년 %m월 %d일')}  ⏰ {now.strftime('%H:%M')}")
 
@@ -4042,6 +4087,10 @@ if _pending_price:
 # 📊 대시보드 (메인 요약 페이지)
 # ─────────────────────────────────────────────
 if current_page == "dashboard":
+    # ── 📅 현재 분석 기간 표시 (U-3) ──
+    _g_start, _g_end, _g_label = get_global_period()
+    st.caption(f"📅 현재 분석 기간: **{_g_label}** ({_g_start} ~ {_g_end}) — 사이드바에서 변경")
+
     # ── 🚦 Action Inbox (홈 관제탑) ──
     _sig = compute_action_signals()
     if _sig["total"] > 0 or _sig["queued_alerts"]:
