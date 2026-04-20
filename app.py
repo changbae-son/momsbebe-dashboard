@@ -596,20 +596,52 @@ TASKS_FILE = os.path.join(DATA_DIR, "tasks.json")
 STICKY_FILE = os.path.join(DATA_DIR, "sticky_notes.json")
 SEARCH_HISTORY_FILE = os.path.join(DATA_DIR, "search_history.json")
 WEEKLY_GOALS_FILE = os.path.join(DATA_DIR, "weekly_goals.json")
-MONTHLY_GOALS_FILE = os.path.join(DATA_DIR, "monthly_goals.json")
+MONTHLY_GOALS_FILE  = os.path.join(DATA_DIR, "monthly_goals.json")
+PLATFORMS_FILE      = os.path.join(DATA_DIR, "platforms.json")
+PENDING_ALERTS_FILE = os.path.join(DATA_DIR, "pending_alerts.json")
+CASES_FILE          = os.path.join(DATA_DIR, "cases.json")
 
 # ─────────────────────────────────────────────
-# 텔레그램 알림
+# 플랫폼 관리
+# ─────────────────────────────────────────────
+_DEFAULT_PLATFORMS = [
+    {"id": "naver",          "name": "네이버 스마트스토어", "group": "네이버"},
+    {"id": "coupang",        "name": "쿠팡 (일반)",         "group": "쿠팡"},
+    {"id": "coupang_rocket", "name": "쿠팡 로켓배송",       "group": "쿠팡"},
+    {"id": "coupang_jet",    "name": "쿠팡 제트배송",       "group": "쿠팡"},
+    {"id": "gmarket",        "name": "지마켓",               "group": "지마켓/옥션"},
+    {"id": "auction",        "name": "옥션",                 "group": "지마켓/옥션"},
+    {"id": "11st",           "name": "11번가",               "group": "11번가"},
+    {"id": "lotteon",        "name": "롯데온",               "group": "롯데"},
+    {"id": "kakao",          "name": "카카오톡스토어",       "group": "카카오"},
+    {"id": "toss",           "name": "토스쇼핑",             "group": "토스"},
+    {"id": "ssg",            "name": "SSG닷컴",              "group": "신세계"},
+]
+
+def load_platforms() -> list:
+    data = load_json(PLATFORMS_FILE, {"platforms": _DEFAULT_PLATFORMS})
+    return data.get("platforms", _DEFAULT_PLATFORMS)
+
+def save_platforms(platforms: list):
+    save_json(PLATFORMS_FILE, {"platforms": platforms})
+
+def get_platform_names() -> list[str]:
+    return [p["name"] for p in load_platforms()]
+
+# ─────────────────────────────────────────────
+# 텔레그램 알림 (우선순위 필터링)
 # ─────────────────────────────────────────────
 try:
-    _TG_TOKEN = st.secrets["telegram"]["TELEGRAM_TOKEN"]
+    _TG_TOKEN   = st.secrets["telegram"]["TELEGRAM_TOKEN"]
     _TG_CHAT_ID = st.secrets["telegram"]["TELEGRAM_CHAT_ID"]
 except Exception:
-    _TG_TOKEN = ""
+    _TG_TOKEN   = ""
     _TG_CHAT_ID = ""
 
+_ALERT_THRESHOLD = 100  # 일평균 이상이면 즉시 알림, 미만이면 일일 요약
+
 def send_telegram(message: str):
-    """텔레그램 메시지 전송 (실패해도 앱에 영향 없음)."""
+    """텔레그램 즉시 전송."""
     if not _TG_TOKEN or not _TG_CHAT_ID:
         return
     try:
@@ -620,6 +652,78 @@ def send_telegram(message: str):
         )
     except Exception:
         pass
+
+def send_telegram_smart(message: str, avg_qty: float = 9999):
+    """일평균 수량 기준으로 즉시 전송 vs 일일 요약 큐잉."""
+    if avg_qty >= _ALERT_THRESHOLD:
+        send_telegram(message)
+    else:
+        pending = load_json(PENDING_ALERTS_FILE, {"alerts": []})
+        pending["alerts"].append({
+            "message": message,
+            "queued_at": datetime.now(KST).strftime("%Y-%m-%d %H:%M"),
+        })
+        save_json(PENDING_ALERTS_FILE, pending)
+
+def flush_pending_alerts():
+    """오후 6시 이후 앱 로드 시 대기 알림을 일일 요약으로 전송."""
+    now_kst = datetime.now(KST)
+    if now_kst.hour < 18:
+        return
+    pending = load_json(PENDING_ALERTS_FILE, {"alerts": []})
+    alerts = pending.get("alerts", [])
+    today_str_flush = now_kst.strftime("%Y-%m-%d")
+    today_alerts = [a for a in alerts if a.get("queued_at", "").startswith(today_str_flush)]
+    if not today_alerts:
+        return
+    summary = f"📋 <b>[일일 요약] {today_str_flush}</b> — 저빈도 대응 완료 {len(today_alerts)}건\n"
+    for a in today_alerts[:10]:
+        lines = a["message"].split("\n")
+        summary += f"• {lines[1] if len(lines) > 1 else lines[0]}\n"
+    if len(today_alerts) > 10:
+        summary += f"… 외 {len(today_alerts)-10}건"
+    send_telegram(summary)
+    remaining = [a for a in alerts if not a.get("queued_at", "").startswith(today_str_flush)]
+    save_json(PENDING_ALERTS_FILE, {"alerts": remaining})
+
+# ─────────────────────────────────────────────
+# 사례 DB
+# ─────────────────────────────────────────────
+def save_case(task: dict, action: dict):
+    """완료된 대응을 사례 DB에 저장."""
+    cases = load_json(CASES_FILE, {"cases": []})
+    meta  = task.get("meta", {})
+    case  = {
+        "id":             task.get("id", ""),
+        "date":           datetime.now(KST).strftime("%Y-%m-%d"),
+        "product_id":     meta.get("product_id", ""),
+        "product_name":   meta.get("product_name", task.get("title", "")),
+        "avg_qty":        meta.get("avg_qty", 0),
+        "action_type":    action.get("type", ""),
+        "action_label":   action.get("label", ""),
+        "cause":          action.get("cause", ""),
+        "detail":         action.get("detail", ""),
+        "memo":           action.get("memo", ""),
+        "platforms":      action.get("platforms", []),
+        "margin_impact":  action.get("margin_impact", "미확인"),
+        "worker":         action.get("worker", "MD"),
+        "outcome_7d":     None,   # 7일 후 자동 업데이트
+        "outcome_date":   (datetime.now(KST) + timedelta(days=7)).strftime("%Y-%m-%d"),
+    }
+    cases["cases"].append(case)
+    save_json(CASES_FILE, cases)
+
+def check_outcomes_7d():
+    """7일이 지난 사례의 출고량 결과를 업데이트 (앱 로드 시 호출)."""
+    cases = load_json(CASES_FILE, {"cases": []})
+    today = datetime.now(KST).strftime("%Y-%m-%d")
+    updated = False
+    for c in cases.get("cases", []):
+        if c.get("outcome_7d") is None and c.get("outcome_date", "9999") <= today:
+            c["outcome_7d"] = "pending_check"
+            updated = True
+    if updated:
+        save_json(CASES_FILE, cases)
 
 
 # ─────────────────────────────────────────────
@@ -2777,50 +2881,116 @@ def show_price_check_dialog():
 
 ACTION_TYPES = {
     "price_change": "💰 가격 수정",
-    "page_edit": "📝 상세페이지 수정",
-    "stock_check": "📦 재고 확인/발주",
-    "no_issue": "🔍 확인만 (이상없음)",
-    "defer": "⏳ 내일 대응 예정",
+    "page_edit":    "📝 상세페이지 수정",
+    "stock_check":  "📦 재고 확인/발주",
+    "no_issue":     "🔍 확인만 (이상없음)",
+    "defer":        "⏳ 내일 대응 예정",
+}
+
+CAUSE_TYPES = {
+    "price_compete":  "💸 가격 경쟁 패배",
+    "stock_shortage": "📦 재고 부족",
+    "page_quality":   "📄 상세페이지 미흡",
+    "exposure_drop":  "📉 플랫폼 노출 감소",
+    "seasonal":       "🌸 계절적 요인",
+    "other":          "❓ 기타",
+}
+
+MARGIN_IMPACT = {
+    "improved":   "📈 개선됨",
+    "neutral":    "➡️ 유지",
+    "worsened":   "📉 악화됨",
+    "unknown":    "❓ 미확인",
 }
 
 
-@st.dialog("✅ 대응 완료 기록", width="small")
+@st.dialog("✅ 대응 완료 기록", width="large")
 def show_action_dialog():
     """태스크 완료 시 대응 내용을 기록하는 팝업."""
     data = st.session_state.get("_action_dialog_data", {})
     if not data:
         st.warning("데이터 없음")
         return
-    tid = data.get("task_id", "")
+    tid   = data.get("task_id", "")
     pname = data.get("product_name", "")
-    st.markdown(f"**{pname}**")
-    st.caption("어떤 대응을 했나요?")
-    action_type = st.radio(
-        "대응 유형", options=list(ACTION_TYPES.keys()),
-        format_func=lambda x: ACTION_TYPES[x],
-        key="_action_type_radio", label_visibility="collapsed",
+
+    st.markdown(f"### {pname}")
+    st.divider()
+
+    # ── Row 1: 대응 유형 + 원인 분류 ──
+    col1, col2 = st.columns(2)
+    with col1:
+        st.caption("**대응 유형**")
+        action_type = st.radio(
+            "대응 유형", options=list(ACTION_TYPES.keys()),
+            format_func=lambda x: ACTION_TYPES[x],
+            key="_action_type_radio", label_visibility="collapsed",
+        )
+    with col2:
+        st.caption("**원인 분류**")
+        cause = st.radio(
+            "원인 분류", options=list(CAUSE_TYPES.keys()),
+            format_func=lambda x: CAUSE_TYPES[x],
+            key="_action_cause_radio", label_visibility="collapsed",
+        )
+
+    st.divider()
+
+    # ── Row 2: 플랫폼 멀티셀렉트 ──
+    st.caption("**문제 발생 플랫폼** (복수 선택 가능)")
+    _platform_names = get_platform_names()
+    platforms_selected = st.multiselect(
+        "플랫폼", options=_platform_names,
+        default=[],
+        key="_action_platforms",
+        label_visibility="collapsed",
+        placeholder="해당 플랫폼을 선택하세요",
     )
 
-    # 대응 유형에 따른 개선 내용 입력 (구체적 기록)
+    st.divider()
+
+    # ── Row 3: 개선 내용 + 마진 영향 ──
     _detail_placeholders = {
-        "price_change": "예: 12,900원 → 10,900원으로 변경 (쿠팡)",
-        "page_edit": "예: 썸네일에 개당 단가 텍스트 추가",
-        "stock_check": "예: 발주 50개 요청 완료",
-        "no_issue": "예: 경쟁사 대비 가격 정상 확인",
-        "defer": "예: 내일 오전 마케팅팀과 협의 예정",
+        "price_change": "예: 12,900원 → 10,900원으로 변경",
+        "page_edit":    "예: 썸네일에 개당 단가 텍스트 추가",
+        "stock_check":  "예: 발주 50개 요청 완료",
+        "no_issue":     "예: 경쟁사 대비 가격 정상 확인",
+        "defer":        "예: 내일 오전 마케팅팀과 협의 예정",
     }
-    detail = st.text_input(
-        "개선 내용 (구체적으로)",
-        placeholder=_detail_placeholders.get(action_type, "어떻게 개선했는지 기록"),
-        key="_action_detail",
-    )
+    col3, col4 = st.columns([3, 1])
+    with col3:
+        detail = st.text_input(
+            "개선 내용 (구체적으로)",
+            placeholder=_detail_placeholders.get(action_type, "어떻게 개선했는지 기록"),
+            key="_action_detail",
+        )
+    with col4:
+        st.caption("**마진 영향**")
+        margin_impact = st.selectbox(
+            "마진 영향", options=list(MARGIN_IMPACT.keys()),
+            format_func=lambda x: MARGIN_IMPACT[x],
+            key="_action_margin", label_visibility="collapsed",
+        )
+
     memo = st.text_input("추가 메모 (선택)", placeholder="기타 참고 사항", key="_action_memo")
+
+    # ── 유사 사례 힌트 ──
+    _cases = load_json(CASES_FILE, {"cases": []}).get("cases", [])
+    _pid   = data.get("product_id", "")
+    _similar = [c for c in _cases if c.get("product_id") == _pid and c.get("outcome_7d") == "recovered"]
+    if _similar:
+        last = _similar[-1]
+        st.info(f"💡 유사 사례: {last['date']} — {last['action_label']} → {last.get('detail','')}")
+
     if st.button("완료 저장", width="stretch", type="primary"):
         st.session_state["_action_result"] = {
-            "task_id": tid,
-            "action_type": action_type,
-            "detail": detail,
-            "memo": memo,
+            "task_id":       tid,
+            "action_type":   action_type,
+            "cause":         cause,
+            "detail":        detail,
+            "memo":          memo,
+            "platforms":     platforms_selected,
+            "margin_impact": margin_impact,
         }
         st.rerun()
 
@@ -3595,6 +3765,10 @@ _gist_restore_all()
 # 페이지 라우팅
 # ═════════════════════════════════════════════
 current_page = st.session_state.get("current_page", "dashboard")
+
+# 앱 로드 시 백그라운드 작업
+flush_pending_alerts()
+check_outcomes_7d()
 
 
 # ─────────────────────────────────────────────
@@ -4791,14 +4965,16 @@ elif current_page == "daily_log":
                 t["done"] = done_value
                 t["done_at"] = now.strftime("%Y-%m-%d %H:%M") if done_value else None
                 if done_value:
-                    _pname = t.get("meta", {}).get("product_name", t.get("title", ""))
-                    _writer = t.get("writer", "MD")
-                    _pri = {"urgent": "🔴 긴급", "watch": "🟡 확인", "normal": "🔵 일반"}.get(t.get("priority", "normal"), "🔵 일반")
-                    send_telegram(
+                    _pname   = t.get("meta", {}).get("product_name", t.get("title", ""))
+                    _writer  = t.get("writer", "MD")
+                    _avg_qty = t.get("meta", {}).get("avg_qty", 9999)
+                    _pri     = {"urgent": "🔴 긴급", "watch": "🟡 확인", "normal": "🔵 일반"}.get(t.get("priority", "normal"), "🔵 일반")
+                    send_telegram_smart(
                         f"✅ <b>[업무완료]</b> 신아인터네셔날\n"
                         f"📦 {_pname}\n"
-                        f"👤 작성자: {_writer}  |  {_pri}\n"
-                        f"🕐 {now.strftime('%H:%M')}"
+                        f"👤 {_writer}  |  {_pri}  |  일평균 {int(_avg_qty)}개\n"
+                        f"🕐 {now.strftime('%H:%M')}",
+                        avg_qty=_avg_qty,
                     )
                 break
         save_tasks()
@@ -4916,42 +5092,48 @@ elif current_page == "daily_log":
         _ar_tid = _action_result["task_id"]
         for t in all_tasks:
             if t["id"] == _ar_tid:
-                t["done"] = True
+                t["done"]    = True
                 t["done_at"] = datetime.now(KST).strftime("%Y-%m-%d %H:%M")
-                t["action"] = {
-                    "type": _action_result["action_type"],
-                    "label": ACTION_TYPES.get(_action_result["action_type"], ""),
-                    "detail": _action_result.get("detail", ""),
-                    "memo": _action_result.get("memo", ""),
-                    "worker": "MD",
-                    "time": datetime.now(KST).strftime("%H:%M"),
+                t["action"]  = {
+                    "type":          _action_result["action_type"],
+                    "label":         ACTION_TYPES.get(_action_result["action_type"], ""),
+                    "cause":         _action_result.get("cause", ""),
+                    "cause_label":   CAUSE_TYPES.get(_action_result.get("cause", ""), ""),
+                    "detail":        _action_result.get("detail", ""),
+                    "memo":          _action_result.get("memo", ""),
+                    "platforms":     _action_result.get("platforms", []),
+                    "margin_impact": _action_result.get("margin_impact", "unknown"),
+                    "margin_label":  MARGIN_IMPACT.get(_action_result.get("margin_impact", "unknown"), ""),
+                    "worker":        "MD",
+                    "time":          datetime.now(KST).strftime("%H:%M"),
                 }
-                break
-        save_tasks()
-        # 텔레그램 알림
-        for t in all_tasks:
-            if t["id"] == _ar_tid:
-                _a = t.get("action", {})
-                _pname = t.get("meta", {}).get("product_name", t.get("title", ""))
-                _label = _a.get("label", "완료")
-                _detail = _a.get("detail", "")
-                _memo = _a.get("memo", "")
+                # 사례 DB 저장
+                save_case(t, t["action"])
+                # 텔레그램 스마트 알림
+                _avg_qty = t.get("meta", {}).get("avg_qty", 9999)
+                _pname   = t.get("meta", {}).get("product_name", t.get("title", ""))
+                _label   = t["action"]["label"]
+                _cause   = t["action"]["cause_label"]
+                _pfs     = ", ".join(t["action"]["platforms"]) if t["action"]["platforms"] else "전체"
+                _margin  = t["action"]["margin_label"]
+                _detail  = t["action"]["detail"]
                 _msg = (
                     f"📋 <b>[대응완료]</b> 신아인터네셔날\n"
                     f"🏷 {_pname}\n"
-                    f"🔧 액션: {_label}\n"
+                    f"🔧 {_label}  |  원인: {_cause}\n"
+                    f"🛒 플랫폼: {_pfs}\n"
+                    f"💹 마진: {_margin}\n"
                 )
                 if _detail:
                     _msg += f"📝 {_detail}\n"
-                if _memo:
-                    _msg += f"💬 {_memo}\n"
                 _msg += f"🕐 {datetime.now(KST).strftime('%H:%M')}"
-                send_telegram(_msg)
+                send_telegram_smart(_msg, avg_qty=_avg_qty)
                 break
-        st.toast(f"✅ 대응 기록 완료")
+        save_tasks()
+        st.toast("✅ 대응 기록 완료")
 
     # ── 3 Tabs ──
-    tab1, tab_log, tab2, tab3 = st.tabs(["\U0001f4c5 오늘 업무", "\U0001f4ca 대응 로그", "\U0001f4c6 주간/월간 계획", "\U0001f4cc 공유 메모"])
+    tab1, tab_log, tab2, tab3, tab_settings = st.tabs(["\U0001f4c5 오늘 업무", "\U0001f4ca 대응 로그", "\U0001f4c6 주간/월간 계획", "\U0001f4cc 공유 메모", "\u2699\ufe0f 설정"])
 
     # ════════════════════════════════════════════
     # Tab 1: 오늘 업무
@@ -5274,52 +5456,94 @@ elif current_page == "daily_log":
         ]
 
         if _done_tasks:
-            # 대응 로그 KPI
-            _log_total = len(_done_tasks)
+            # ── KPI 요약 ──
+            _log_total       = len(_done_tasks)
             _log_with_action = sum(1 for t in _done_tasks if t.get("action"))
-            _log_types = {}
+            _cause_counter   = {}
+            _platform_counter = {}
+            _margin_counter  = {}
+            _log_types       = {}
             for _lt in _done_tasks:
                 _la = _lt.get("action", {})
                 _llbl = _la.get("label", "✅ 확인 완료") if _la else "✅ 확인 완료"
                 _log_types[_llbl] = _log_types.get(_llbl, 0) + 1
-            _log_type_summary = " · ".join(f"{k} {v}건" for k, v in _log_types.items())
+                if _la:
+                    _cl = _la.get("cause_label", "")
+                    if _cl: _cause_counter[_cl] = _cause_counter.get(_cl, 0) + 1
+                    for _pf in _la.get("platforms", []):
+                        _platform_counter[_pf] = _platform_counter.get(_pf, 0) + 1
+                    _ml = _la.get("margin_label", "")
+                    if _ml: _margin_counter[_ml] = _margin_counter.get(_ml, 0) + 1
 
+            _log_type_summary = " · ".join(f"{k} {v}건" for k, v in _log_types.items())
             _period_label = "오늘" if _log_range == "오늘" else f"{_log_start_str} ~ {_log_end_str}"
+
             st.markdown(f"""
-            <div style="background:linear-gradient(135deg,#e8f5e9,#f1f8e9); border-radius:12px; padding:1rem 1.2rem; margin-bottom:1rem;">
+            <div style="background:linear-gradient(135deg,#e8f5e9,#f1f8e9); border-radius:12px; padding:1rem 1.2rem; margin-bottom:0.8rem;">
                 <div style="font-size:1.1rem; font-weight:700; color:#2e7d32;">📊 대응 로그 ({_period_label})</div>
                 <div style="font-size:0.9rem; color:#558b2f; margin-top:0.3rem;">총 {_log_total}건 완료 (상세기록 {_log_with_action}건) — {_log_type_summary}</div>
             </div>
             """, unsafe_allow_html=True)
 
-            # 날짜별 그룹핑 후 각 그룹을 개별 렌더링
-            _sorted_tasks = sorted(_done_tasks, key=lambda x: (x.get("due", ""), x.get("done_at", "") or ""), reverse=True)
-            # 날짜별로 그룹화
+            # ── 인사이트 요약 카드 (원인/플랫폼/마진) ──
+            if _cause_counter or _platform_counter or _margin_counter:
+                _ic1, _ic2, _ic3 = st.columns(3)
+                with _ic1:
+                    if _cause_counter:
+                        top_cause = max(_cause_counter, key=_cause_counter.get)
+                        st.markdown(f'<div style="background:#fff3e0;border-radius:8px;padding:0.5rem 0.8rem;font-size:0.82rem;"><b>주요 원인</b><br>{top_cause} ({_cause_counter[top_cause]}건)</div>', unsafe_allow_html=True)
+                with _ic2:
+                    if _platform_counter:
+                        top_pf = max(_platform_counter, key=_platform_counter.get)
+                        st.markdown(f'<div style="background:#e3f2fd;border-radius:8px;padding:0.5rem 0.8rem;font-size:0.82rem;"><b>주요 플랫폼</b><br>{top_pf} ({_platform_counter[top_pf]}건)</div>', unsafe_allow_html=True)
+                with _ic3:
+                    if _margin_counter:
+                        top_mg = max(_margin_counter, key=_margin_counter.get)
+                        st.markdown(f'<div style="background:#f3e5f5;border-radius:8px;padding:0.5rem 0.8rem;font-size:0.82rem;"><b>마진 영향</b><br>{top_mg} ({_margin_counter[top_mg]}건)</div>', unsafe_allow_html=True)
+                st.markdown("<div style='margin-bottom:0.6rem'></div>", unsafe_allow_html=True)
+
+            # ── 날짜별 로그 렌더링 ──
             from collections import OrderedDict
-            _date_groups = OrderedDict()
+            _sorted_tasks = sorted(_done_tasks, key=lambda x: (x.get("due",""), x.get("done_at","") or ""), reverse=True)
+            _date_groups  = OrderedDict()
             for t in _sorted_tasks:
-                _t_date = t.get("due", "unknown")
-                if _t_date not in _date_groups:
-                    _date_groups[_t_date] = []
-                _date_groups[_t_date].append(t)
+                _d = t.get("due","unknown")
+                _date_groups.setdefault(_d, []).append(t)
 
             for _date, _tasks_in_date in _date_groups.items():
                 _log_html = ""
                 if _log_range != "오늘":
-                    _log_html += f'<div style="padding:0.5rem 0.8rem; background:#e3f2fd; font-size:0.82rem; font-weight:700; color:#1565c0; border-bottom:1px solid #bbdefb;">📅 {_date} ({len(_tasks_in_date)}건)</div>'
+                    _log_html += f'<div style="padding:0.5rem 0.8rem;background:#e3f2fd;font-size:0.82rem;font-weight:700;color:#1565c0;border-bottom:1px solid #bbdefb;">📅 {_date} ({len(_tasks_in_date)}건)</div>'
                 for t in _tasks_in_date:
-                    _a = t.get("action", {})
-                    _done_at = t.get("done_at", "") or ""
-                    _time = _a.get("time", _done_at[-5:]) if _a else (_done_at[-5:] if len(_done_at) >= 5 else "—")
-                    _type_lbl = _a.get("label", "✅ 확인 완료") if _a else "✅ 확인 완료"
-                    _pname = t.get("meta", {}).get("product_name", t.get("title", ""))
-                    _detail = _a.get("detail", "") if _a else ""
-                    _memo = _a.get("memo", "") if _a else ""
-                    _row_bg = "" if _a else " background:#fafafa;"
-                    _detail_html = f'<div style="font-size:0.82rem; color:#1565c0; margin-top:2px;">📋 {_detail}</div>' if _detail else ""
-                    _memo_html = f'<div style="font-size:0.78rem; color:#888; margin-top:1px;">💬 {_memo}</div>' if _memo else ""
-                    _log_html += f'<div style="padding:0.6rem 0.8rem; border-bottom:1px solid #eee;{_row_bg}"><div style="display:flex; align-items:center; gap:0.5rem;"><span style="font-size:0.78rem; color:#999; width:45px; flex-shrink:0;">{_time}</span><span style="font-size:0.88rem; font-weight:600; width:130px; flex-shrink:0;">{_type_lbl}</span><span style="font-size:0.88rem; flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">{_pname}</span></div>{_detail_html}{_memo_html}</div>'
-                st.markdown(f'<div style="background:#fafafa; border-radius:10px; overflow:hidden; margin-bottom:0.5rem;">{_log_html}</div>', unsafe_allow_html=True)
+                    _a        = t.get("action", {})
+                    _done_at  = t.get("done_at","") or ""
+                    _time     = _a.get("time", _done_at[-5:]) if _a else (_done_at[-5:] if len(_done_at)>=5 else "—")
+                    _type_lbl = _a.get("label","✅ 확인 완료") if _a else "✅ 확인 완료"
+                    _pname    = t.get("meta",{}).get("product_name", t.get("title",""))
+                    _detail   = _a.get("detail","") if _a else ""
+                    _memo     = _a.get("memo","") if _a else ""
+                    _cause_lbl= _a.get("cause_label","") if _a else ""
+                    _pfs      = ", ".join(_a.get("platforms",[])) if _a else ""
+                    _mg_lbl   = _a.get("margin_label","") if _a else ""
+                    _row_bg   = "" if _a else " background:#fafafa;"
+                    _meta_html = ""
+                    if _cause_lbl or _pfs or _mg_lbl:
+                        _tags = []
+                        if _cause_lbl: _tags.append(f'<span style="background:#fff3e0;color:#e65100;padding:1px 5px;border-radius:4px;font-size:0.7rem;">{_cause_lbl}</span>')
+                        if _pfs:       _tags.append(f'<span style="background:#e3f2fd;color:#1565c0;padding:1px 5px;border-radius:4px;font-size:0.7rem;">🛒 {_pfs}</span>')
+                        if _mg_lbl:    _tags.append(f'<span style="background:#f3e5f5;color:#7b1fa2;padding:1px 5px;border-radius:4px;font-size:0.7rem;">{_mg_lbl}</span>')
+                        _meta_html = f'<div style="margin-top:3px;display:flex;gap:4px;flex-wrap:wrap;">{" ".join(_tags)}</div>'
+                    _detail_html = f'<div style="font-size:0.82rem;color:#1565c0;margin-top:2px;">📋 {_detail}</div>' if _detail else ""
+                    _memo_html   = f'<div style="font-size:0.78rem;color:#888;margin-top:1px;">💬 {_memo}</div>' if _memo else ""
+                    _log_html += (
+                        f'<div style="padding:0.6rem 0.8rem;border-bottom:1px solid #eee;{_row_bg}">'
+                        f'<div style="display:flex;align-items:center;gap:0.5rem;">'
+                        f'<span style="font-size:0.78rem;color:#999;width:45px;flex-shrink:0;">{_time}</span>'
+                        f'<span style="font-size:0.88rem;font-weight:600;width:130px;flex-shrink:0;">{_type_lbl}</span>'
+                        f'<span style="font-size:0.88rem;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">{_pname}</span>'
+                        f'</div>{_meta_html}{_detail_html}{_memo_html}</div>'
+                    )
+                st.markdown(f'<div style="background:#fafafa;border-radius:10px;overflow:hidden;margin-bottom:0.5rem;">{_log_html}</div>', unsafe_allow_html=True)
         else:
             st.info("선택한 기간에 완료된 업무가 없습니다.")
 
@@ -5733,6 +5957,56 @@ elif current_page == "daily_log":
                 st.rerun()
             elif s_sub:
                 st.warning("메모 내용을 입력해주세요.")
+
+
+    # ════════════════════════════════════════════
+    # Tab 설정: 플랫폼 관리
+    # ════════════════════════════════════════════
+    with tab_settings:
+        st.markdown("#### ⚙️ 플랫폼 관리")
+        st.caption("판매 채널을 추가·삭제할 수 있습니다. 쿠팡 로켓/제트는 별도 항목으로 관리됩니다.")
+
+        _pf_list = load_platforms()
+
+        # 현재 플랫폼 목록
+        _pf_groups = {}
+        for _p in _pf_list:
+            _pf_groups.setdefault(_p.get("group","기타"), []).append(_p)
+
+        for _grp, _items in _pf_groups.items():
+            st.markdown(f"**{_grp}**")
+            for _pi in _items:
+                _pc1, _pc2 = st.columns([8,2])
+                with _pc1:
+                    st.markdown(f"🏪 {_pi['name']}")
+                with _pc2:
+                    if st.button("삭제", key=f"del_pf_{_pi['id']}"):
+                        _pf_list = [p for p in _pf_list if p["id"] != _pi["id"]]
+                        save_platforms(_pf_list)
+                        st.rerun()
+            st.markdown("---")
+
+        # 플랫폼 추가 폼
+        with st.expander("➕ 플랫폼 추가"):
+            with st.form("add_platform_form", clear_on_submit=True):
+                _pf_col1, _pf_col2, _pf_col3 = st.columns([3,2,2])
+                with _pf_col1:
+                    _new_pf_name = st.text_input("플랫폼명", placeholder="예: 위메프")
+                with _pf_col2:
+                    _new_pf_group = st.text_input("그룹", placeholder="예: 위메프")
+                with _pf_col3:
+                    _new_pf_id = st.text_input("ID (영문)", placeholder="예: wemakeprice")
+                _pf_submit = st.form_submit_button("추가", type="primary")
+                if _pf_submit and _new_pf_name.strip() and _new_pf_id.strip():
+                    _pf_list.append({"id": _new_pf_id.strip(), "name": _new_pf_name.strip(), "group": _new_pf_group.strip() or _new_pf_name.strip()})
+                    save_platforms(_pf_list)
+                    st.success(f"'{_new_pf_name}' 추가 완료!")
+                    st.rerun()
+
+        st.markdown("---")
+        st.markdown("#### 🔔 알림 임계값 설정")
+        st.caption(f"현재: 일평균 **{_ALERT_THRESHOLD}개 이상** → 즉시 알림 / 미만 → 오후 6시 일일 요약")
+        st.info("임계값 변경은 코드의 `_ALERT_THRESHOLD` 값을 수정하세요.")
 
 
 # ═════════════════════════════════════════════
