@@ -3374,7 +3374,6 @@ with st.sidebar:
                     if payload:
                         st.session_state["_auto_price_keyword"] = payload
                         st.session_state["active_keyword"] = payload
-                    st.session_state._palette_q = ""
                     st.rerun()
         else:
             st.caption("매칭 결과 없음")
