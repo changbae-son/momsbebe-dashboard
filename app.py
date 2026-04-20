@@ -651,6 +651,7 @@ PLATFORMS_FILE      = os.path.join(DATA_DIR, "platforms.json")
 PENDING_ALERTS_FILE = os.path.join(DATA_DIR, "pending_alerts.json")
 CASES_FILE          = os.path.join(DATA_DIR, "cases.json")
 PRICE_HISTORY_FILE  = os.path.join(DATA_DIR, "price_history.json")
+PINNED_SKUS_FILE    = os.path.join(DATA_DIR, "pinned_skus.json")
 
 # ─────────────────────────────────────────────
 # 플랫폼 관리
@@ -825,6 +826,22 @@ def get_price_history(keyword: str, days: int = 7) -> list:
              if h.get("keyword") == keyword and h.get("date", "") >= cutoff]
     items.sort(key=lambda x: x.get("date", ""))
     return items
+
+
+def load_pinned_skus() -> list:
+    return load_json(PINNED_SKUS_FILE, {"pinned": []}).get("pinned", [])
+
+def save_pinned_skus(items: list):
+    save_json(PINNED_SKUS_FILE, {"pinned": items[:20]})
+
+def toggle_pin_sku(sku: dict):
+    """sku = {'keyword':..., 'name':..., 'product_id':...} 형태 토글."""
+    items = load_pinned_skus()
+    key = sku.get("keyword") or sku.get("product_id") or sku.get("name")
+    items = [x for x in items if (x.get("keyword") or x.get("product_id") or x.get("name")) != key]
+    if not any((x.get("keyword") or x.get("product_id") or x.get("name")) == key for x in items):
+        items.insert(0, sku)
+    save_pinned_skus(items)
 
 
 def get_global_period() -> tuple:
@@ -3328,6 +3345,41 @@ with st.sidebar:
     st.caption("ShinA International 업무 대시보드")
     st.markdown("---")
 
+    # ── 🔎 명령 팔레트 (U-4) ──
+    _palette_q = st.text_input("🔎 빠른 검색", placeholder="페이지·키워드·SKU…", key="_palette_q", label_visibility="collapsed")
+    if _palette_q:
+        _q = _palette_q.lower().strip()
+        _menu_map = {
+            "대시보드": "dashboard", "dashboard": "dashboard",
+            "판매": "sales_inventory", "재고": "sales_inventory",
+            "가격": "price_monitor", "모니터": "price_monitor", "price": "price_monitor",
+            "업무": "daily_log", "일지": "daily_log", "log": "daily_log",
+            "재발굴": "slow_moving", "비활성": "slow_moving", "slow": "slow_moving",
+        }
+        _hits = []
+        for k, v in _menu_map.items():
+            if _q in k:
+                _hits.append(("📄 페이지", k, v, None))
+        for kw in load_search_history()[:10]:
+            if _q in kw.lower():
+                _hits.append(("🛒 가격검색", kw, "price_monitor", kw))
+        for p in load_pinned_skus():
+            _name = p.get("name") or p.get("keyword","")
+            if _q in (_name + (p.get("keyword","") or "")).lower():
+                _hits.append(("📌 핀", _name, "price_monitor", p.get("keyword","")))
+        if _hits:
+            for i, (icon, label, page, payload) in enumerate(_hits[:6]):
+                if st.button(f"{icon} {label}", key=f"_pal_{i}", width="stretch"):
+                    st.session_state.current_page = page
+                    if payload:
+                        st.session_state["_auto_price_keyword"] = payload
+                        st.session_state["active_keyword"] = payload
+                    st.session_state._palette_q = ""
+                    st.rerun()
+        else:
+            st.caption("매칭 결과 없음")
+    st.markdown("---")
+
     # ── 메뉴 네비게이션 (알림 뱃지 포함) ──
     _signals = compute_action_signals()
     _badges = {
@@ -4129,6 +4181,40 @@ if current_page == "dashboard":
                     st.markdown(f'- {c.get("date","")} · {c.get("product_name","")} ({c.get("action_label","")})')
         st.markdown("")
 
+    # ── 📌 핀 SKU (U-4) ──
+    _pinned = load_pinned_skus()
+    if _pinned:
+        st.markdown('<div class="section-title"><span class="icon">📌</span> 즐겨찾기 SKU</div>', unsafe_allow_html=True)
+        _pin_cols = st.columns(min(len(_pinned), 5))
+        for i, p in enumerate(_pinned[:5]):
+            with _pin_cols[i]:
+                _kw = p.get("keyword","")
+                _nm = p.get("name") or _kw
+                # 가장 최근 스냅샷 가져오기
+                _hist = get_price_history(_kw, days=30)
+                _last = _hist[-1] if _hist else None
+                if _last:
+                    _our = _last.get("our", [])
+                    _our_p = _our[0]["price"] if _our else None
+                    _our_r = _our[0]["rank"] if _our else None
+                    _t1 = _last.get("top1", {}).get("price", 0)
+                    _diff_html = ""
+                    if _our_p and _t1:
+                        _d = _our_p - _t1
+                        _color = "#ef5350" if _d > 0 else "#2e7d32"
+                        _diff_html = f'<div style="font-size:0.72rem;color:{_color};">vs 1위 {_d:+,}원</div>'
+                    _content = f'<div style="font-size:0.95rem;font-weight:700;">{_nm[:14]}</div>'
+                    _content += f'<div style="font-size:0.7rem;color:#666;">우리 {_our_r}위 · {_our_p:,}원</div>' if _our_r else '<div style="font-size:0.7rem;color:#999;">우리매장 미발견</div>'
+                    _content += _diff_html
+                else:
+                    _content = f'<div style="font-size:0.95rem;font-weight:700;">{_nm[:14]}</div><div style="font-size:0.7rem;color:#999;">스냅샷 없음</div>'
+                st.markdown(f'<div style="background:#fffbf0;border:1px solid #ffe0b2;border-radius:10px;padding:0.6rem;text-align:center;">{_content}</div>', unsafe_allow_html=True)
+                if st.button("🔍 열기", key=f"_pin_open_{i}", width="stretch"):
+                    st.session_state.current_page = "price_monitor"
+                    st.session_state["_auto_price_keyword"] = _kw
+                    st.session_state["active_keyword"] = _kw
+                    st.rerun()
+
     # CEO 지시 사항
     ceo_data = load_json(CEO_MSG_FILE, {"message": "", "updated": ""})
     if ceo_data.get("message"):
@@ -4790,6 +4876,14 @@ elif current_page == "price_monitor":
         st.session_state.active_keyword = search_keyword
 
     if active_keyword:
+        # 📌 핀 토글 버튼
+        _pinned = load_pinned_skus()
+        _is_pinned = any((p.get("keyword") == active_keyword) for p in _pinned)
+        _pin_label = "📌 핀에서 제거" if _is_pinned else "📌 홈 핀에 추가"
+        if st.button(_pin_label, key="_pin_kw_btn"):
+            toggle_pin_sku({"keyword": active_keyword, "name": active_keyword})
+            st.rerun()
+
         with st.spinner(f"'{active_keyword}' 검색 중..."):
             df, is_demo = search_products(active_keyword)
 
