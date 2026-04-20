@@ -600,6 +600,7 @@ MONTHLY_GOALS_FILE  = os.path.join(DATA_DIR, "monthly_goals.json")
 PLATFORMS_FILE      = os.path.join(DATA_DIR, "platforms.json")
 PENDING_ALERTS_FILE = os.path.join(DATA_DIR, "pending_alerts.json")
 CASES_FILE          = os.path.join(DATA_DIR, "cases.json")
+PRICE_HISTORY_FILE  = os.path.join(DATA_DIR, "price_history.json")
 
 # ─────────────────────────────────────────────
 # 플랫폼 관리
@@ -724,6 +725,76 @@ def check_outcomes_7d():
             updated = True
     if updated:
         save_json(CASES_FILE, cases)
+
+
+# ─────────────────────────────────────────────
+# 가격 이력 DB (P-A)
+# ─────────────────────────────────────────────
+def record_price_snapshot(keyword: str, df, our_df):
+    """검색 시점의 가격 스냅샷을 일자별로 기록 (같은 날 같은 키워드는 덮어씀)."""
+    if df is None or len(df) == 0:
+        return
+    today = datetime.now(KST).strftime("%Y-%m-%d")
+    ts    = datetime.now(KST).strftime("%Y-%m-%d %H:%M:%S")
+    top7  = df.head(7)
+    try:
+        snap = {
+            "date": today,
+            "ts":   ts,
+            "keyword":   keyword,
+            "min_price": int(df["가격(원)"].min()),
+            "avg_top7":  int(top7["가격(원)"].mean()),
+            "top1": {
+                "mall":  str(df.iloc[0]["판매처"]),
+                "price": int(df.iloc[0]["가격(원)"]),
+                "name":  str(df.iloc[0]["상품명"])[:60],
+            },
+            "our": [
+                {"mall": str(r["판매처"]), "rank": int(r["순위"]), "price": int(r["가격(원)"])}
+                for _, r in our_df.iterrows()
+            ] if our_df is not None and len(our_df) > 0 else [],
+        }
+    except Exception:
+        return
+    data = load_json(PRICE_HISTORY_FILE, {"history": []})
+    hist = data.get("history", [])
+    # 같은 날 같은 키워드는 마지막 스냅샷으로 덮어씀
+    hist = [h for h in hist if not (h.get("date") == today and h.get("keyword") == keyword)]
+    hist.append(snap)
+    # 키워드별 최근 60일만 유지
+    cutoff = (datetime.now(KST) - timedelta(days=60)).strftime("%Y-%m-%d")
+    hist = [h for h in hist if h.get("date", "") >= cutoff]
+    save_json(PRICE_HISTORY_FILE, {"history": hist})
+
+
+def get_price_history(keyword: str, days: int = 7) -> list:
+    """특정 키워드의 최근 N일 일자별 스냅샷 (날짜순 오름차순)."""
+    data = load_json(PRICE_HISTORY_FILE, {"history": []})
+    cutoff = (datetime.now(KST) - timedelta(days=days)).strftime("%Y-%m-%d")
+    items = [h for h in data.get("history", [])
+             if h.get("keyword") == keyword and h.get("date", "") >= cutoff]
+    items.sort(key=lambda x: x.get("date", ""))
+    return items
+
+
+def find_similar_price_cases(keyword: str, limit: int = 5) -> list:
+    """키워드와 매칭되는 과거 '가격 수정' 사례 (P-D)."""
+    if not keyword:
+        return []
+    cases = load_json(CASES_FILE, {"cases": []}).get("cases", [])
+    kw_lower = keyword.lower().strip()
+    kw_tokens = [t for t in kw_lower.split() if len(t) >= 2]
+    matched = []
+    for c in cases:
+        if c.get("action_type") != "price_change":
+            continue
+        haystack = (str(c.get("product_name", "")) + " " +
+                    str(c.get("detail", "")) + " " +
+                    str(c.get("memo", ""))).lower()
+        if kw_lower in haystack or any(tok in haystack for tok in kw_tokens):
+            matched.append(c)
+    matched.sort(key=lambda x: x.get("date", ""), reverse=True)
+    return matched[:limit]
 
 
 # ─────────────────────────────────────────────
@@ -4539,6 +4610,12 @@ elif current_page == "price_monitor":
             avg_price = df["가격(원)"].mean()
             cheapest = df.loc[df["가격(원)"].idxmin()]
 
+            # 가격 스냅샷 기록 (P-A) — 검색 1회당 1번만
+            _snap_key = f"_snap_recorded_{active_keyword}"
+            if not st.session_state.get(_snap_key):
+                record_price_snapshot(active_keyword, df, df[df["우리매장"]])
+                st.session_state[_snap_key] = True
+
             # ── 우리 매장 현황 ──
             our_col, summary_col = st.columns([3, 2])
 
@@ -4643,6 +4720,71 @@ elif current_page == "price_monitor":
                     font=dict(size=11),
                 )
                 st.plotly_chart(fig, width="stretch")
+
+            # ── 가격 추이 (최근 7일) — P-A ──
+            _hist = get_price_history(active_keyword, days=7)
+            if len(_hist) >= 2:
+                st.markdown('<div class="section-title"><span class="icon">📈</span> 가격 추이 (최근 7일)</div>', unsafe_allow_html=True)
+                _dates = [h["date"] for h in _hist]
+                _top1  = [h.get("top1", {}).get("price", 0) for h in _hist]
+                _avg   = [h.get("avg_top7", 0) for h in _hist]
+                _our   = [(h["our"][0]["price"] if h.get("our") else None) for h in _hist]
+                fig_h = go.Figure()
+                fig_h.add_trace(go.Scatter(x=_dates, y=_top1, name="1위 가격", mode="lines+markers", line=dict(color="#ef5350", width=2)))
+                fig_h.add_trace(go.Scatter(x=_dates, y=_avg,  name="Top7 평균", mode="lines+markers", line=dict(color="#90a4ae", width=2, dash="dot")))
+                if any(v is not None for v in _our):
+                    fig_h.add_trace(go.Scatter(x=_dates, y=_our, name="우리 가격", mode="lines+markers", line=dict(color="#f59e0b", width=3)))
+                fig_h.update_layout(
+                    height=260,
+                    margin=dict(t=20, b=20, l=10, r=10),
+                    plot_bgcolor="rgba(0,0,0,0)",
+                    paper_bgcolor="rgba(0,0,0,0)",
+                    font=dict(size=11),
+                    legend=dict(orientation="h", y=-0.2),
+                    yaxis=dict(title="가격(원)", gridcolor="rgba(128,128,128,0.1)"),
+                )
+                st.plotly_chart(fig_h, width="stretch")
+
+                # 변동 요약
+                _t_diff = _top1[-1] - _top1[0] if _top1[0] else 0
+                _t_pct  = (_t_diff / _top1[0] * 100) if _top1[0] else 0
+                _delta_txt = f"📊 1위 가격 {_dates[0]} {_top1[0]:,}원 → {_dates[-1]} {_top1[-1]:,}원 ({_t_diff:+,}원 / {_t_pct:+.1f}%)"
+                st.caption(_delta_txt)
+            elif len(_hist) == 1:
+                st.caption(f"💡 가격 추이는 2회 이상 검색이 누적되어야 표시됩니다 (현재 1회 기록됨, 키워드: '{active_keyword}').")
+
+            # ── 과거 가격 수정 사례 — P-D ──
+            _cases = find_similar_price_cases(active_keyword, limit=5)
+            if _cases:
+                st.markdown('<div class="section-title"><span class="icon">🧠</span> 과거 가격 수정 사례 (사례 DB)</div>', unsafe_allow_html=True)
+                for c in _cases:
+                    cause = c.get("cause", "")
+                    cause_label = CAUSE_TYPES.get(cause, cause or "원인 미기재")
+                    margin = c.get("margin_impact", "미확인")
+                    margin_label = MARGIN_IMPACT.get(margin, margin)
+                    outcome = c.get("outcome_7d")
+                    if outcome is None:
+                        outcome_html = f'<span style="color:#999;">⏳ 결과 대기 ({c.get("outcome_date","")})</span>'
+                    elif outcome == "pending_check":
+                        outcome_html = '<span style="color:#e65100;">📌 7일 경과 — 결과 확인 필요</span>'
+                    else:
+                        outcome_html = f'<span style="color:#2e7d32;">✅ {outcome}</span>'
+                    detail = c.get("detail") or c.get("memo") or "(상세 없음)"
+                    plats  = ", ".join(c.get("platforms", [])) or "-"
+                    card = (
+                        f'<div style="background:#fafafa;border:1px solid #e8e8e8;border-radius:8px;'
+                        f'padding:0.6rem 0.8rem;margin-bottom:0.4rem;font-size:0.82rem;">'
+                        f'<div style="display:flex;justify-content:space-between;margin-bottom:0.25rem;">'
+                        f'<strong>{c.get("date","")} · {c.get("product_name","")}</strong>'
+                        f'<span style="opacity:0.7;">{cause_label} · 마진 {margin_label}</span>'
+                        f'</div>'
+                        f'<div style="opacity:0.85;">💰 {detail}</div>'
+                        f'<div style="font-size:0.72rem;opacity:0.65;margin-top:0.2rem;">'
+                        f'플랫폼: {plats} · 작업자: {c.get("worker","-")} · {outcome_html}'
+                        f'</div></div>'
+                    )
+                    st.markdown(card, unsafe_allow_html=True)
+                st.caption(f"💡 '{active_keyword}' 관련 과거 가격 수정 {len(_cases)}건 발견 — 동일 원인 반복 시 가격 인하 외 대안 검토 필요")
 
             # ── 순위 경쟁력 분석 ──
             st.markdown('<div class="section-title"><span class="icon">📈</span> 순위 경쟁력 분석</div>', unsafe_allow_html=True)
