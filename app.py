@@ -598,6 +598,29 @@ SEARCH_HISTORY_FILE = os.path.join(DATA_DIR, "search_history.json")
 WEEKLY_GOALS_FILE = os.path.join(DATA_DIR, "weekly_goals.json")
 MONTHLY_GOALS_FILE = os.path.join(DATA_DIR, "monthly_goals.json")
 
+# ─────────────────────────────────────────────
+# 텔레그램 알림
+# ─────────────────────────────────────────────
+try:
+    _TG_TOKEN = st.secrets["telegram"]["TELEGRAM_TOKEN"]
+    _TG_CHAT_ID = st.secrets["telegram"]["TELEGRAM_CHAT_ID"]
+except Exception:
+    _TG_TOKEN = ""
+    _TG_CHAT_ID = ""
+
+def send_telegram(message: str):
+    """텔레그램 메시지 전송 (실패해도 앱에 영향 없음)."""
+    if not _TG_TOKEN or not _TG_CHAT_ID:
+        return
+    try:
+        requests.post(
+            f"https://api.telegram.org/bot{_TG_TOKEN}/sendMessage",
+            json={"chat_id": _TG_CHAT_ID, "text": message, "parse_mode": "HTML"},
+            timeout=5,
+        )
+    except Exception:
+        pass
+
 
 # ─────────────────────────────────────────────
 # GitHub Gist 기반 클라우드 데이터 영속성
@@ -4767,6 +4790,16 @@ elif current_page == "daily_log":
             if t["id"] == task_id:
                 t["done"] = done_value
                 t["done_at"] = now.strftime("%Y-%m-%d %H:%M") if done_value else None
+                if done_value:
+                    _pname = t.get("meta", {}).get("product_name", t.get("title", ""))
+                    _writer = t.get("writer", "MD")
+                    _pri = {"urgent": "🔴 긴급", "watch": "🟡 확인", "normal": "🔵 일반"}.get(t.get("priority", "normal"), "🔵 일반")
+                    send_telegram(
+                        f"✅ <b>[업무완료]</b> 신아인터네셔날\n"
+                        f"📦 {_pname}\n"
+                        f"👤 작성자: {_writer}  |  {_pri}\n"
+                        f"🕐 {now.strftime('%H:%M')}"
+                    )
                 break
         save_tasks()
 
@@ -4895,6 +4928,26 @@ elif current_page == "daily_log":
                 }
                 break
         save_tasks()
+        # 텔레그램 알림
+        for t in all_tasks:
+            if t["id"] == _ar_tid:
+                _a = t.get("action", {})
+                _pname = t.get("meta", {}).get("product_name", t.get("title", ""))
+                _label = _a.get("label", "완료")
+                _detail = _a.get("detail", "")
+                _memo = _a.get("memo", "")
+                _msg = (
+                    f"📋 <b>[대응완료]</b> 신아인터네셔날\n"
+                    f"🏷 {_pname}\n"
+                    f"🔧 액션: {_label}\n"
+                )
+                if _detail:
+                    _msg += f"📝 {_detail}\n"
+                if _memo:
+                    _msg += f"💬 {_memo}\n"
+                _msg += f"🕐 {datetime.now(KST).strftime('%H:%M')}"
+                send_telegram(_msg)
+                break
         st.toast(f"✅ 대응 기록 완료")
 
     # ── 3 Tabs ──
@@ -5178,6 +5231,13 @@ elif current_page == "daily_log":
             add_submitted = st.form_submit_button("\U0001f4be 업무 추가", type="primary", width="stretch")
             if add_submitted and new_title.strip():
                 add_task(new_title.strip(), task_type=new_type, priority=new_priority, due=today_str, writer=new_writer)
+                _pri_label = {"urgent": "🔴 긴급", "normal": "🔵 일반", "routine": "🟢 정기"}.get(new_priority, "🔵 일반")
+                send_telegram(
+                    f"📌 <b>[업무등록]</b> 신아인터네셔날\n"
+                    f"📝 {new_title.strip()}\n"
+                    f"👤 {new_writer}  |  {_pri_label}\n"
+                    f"🕐 {now.strftime('%H:%M')}"
+                )
                 st.success("업무가 추가되었습니다!")
                 st.rerun()
             elif add_submitted:
