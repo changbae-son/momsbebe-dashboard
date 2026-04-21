@@ -659,6 +659,7 @@ CASES_FILE          = os.path.join(DATA_DIR, "cases.json")
 PRICE_HISTORY_FILE  = os.path.join(DATA_DIR, "price_history.json")
 PINNED_SKUS_FILE    = os.path.join(DATA_DIR, "pinned_skus.json")
 WEEKLY_REPORT_FILE  = os.path.join(DATA_DIR, "weekly_report_state.json")
+COSTS_FILE          = os.path.join(DATA_DIR, "costs.json")  # D-2: SKU별 원가
 
 # ─────────────────────────────────────────────
 # 플랫폼 관리
@@ -1063,6 +1064,92 @@ def toggle_pin_sku(sku: dict):
     if not any((x.get("keyword") or x.get("product_id") or x.get("name")) == key for x in items):
         items.insert(0, sku)
     save_pinned_skus(items)
+
+
+# ─────────────────────────────────────────────
+# D-2. SKU별 원가 + 3시나리오 권장가 엔진
+# ─────────────────────────────────────────────
+def _cost_key(product_name: str) -> str:
+    """원가 저장용 정규화 키 (상품명 첫 40자)."""
+    return (product_name or "").strip()[:40]
+
+def load_costs() -> dict:
+    """{cost_key: {'unit_cost': int, 'updated': 'YYYY-MM-DD'}}"""
+    return load_json(COSTS_FILE, {"costs": {}}).get("costs", {})
+
+def save_cost(product_name: str, unit_cost: int):
+    if not product_name:
+        return
+    data = load_json(COSTS_FILE, {"costs": {}})
+    data.setdefault("costs", {})[_cost_key(product_name)] = {
+        "unit_cost": int(unit_cost),
+        "updated":   datetime.now(KST).strftime("%Y-%m-%d"),
+    }
+    save_json(COSTS_FILE, data)
+
+def get_unit_cost(product_name: str) -> int:
+    return int(load_costs().get(_cost_key(product_name), {}).get("unit_cost", 0))
+
+def compute_price_scenarios(our_unit_price: int, our_qty_per_pack: int,
+                            avg_qty_per_day: float, min_unit_price: int,
+                            avg_unit_price: int, unit_cost: int) -> dict:
+    """3시나리오 권장가 계산.
+    가격탄력성 PED ≈ 2.0 가정 (가격 -10% → 판매 +20%).
+    Returns: {scenario_id: {price, daily_qty, daily_margin, monthly_margin, label, color, desc}}
+    """
+    PED = 2.0  # 일회용 위생용품 일반적 탄성
+
+    def _calc(new_unit_price: int) -> dict:
+        new_total = round(new_unit_price * our_qty_per_pack) if our_qty_per_pack else new_unit_price
+        # 가격 변화율
+        if our_unit_price > 0:
+            _delta = (our_unit_price - new_unit_price) / our_unit_price
+        else:
+            _delta = 0
+        # 새 일판매량 (탄성치 적용)
+        _new_qty = max(0.1, avg_qty_per_day * (1 + PED * _delta)) if avg_qty_per_day > 0 else 0
+        # 일 마진(개당 마진 × 일판매량 × 팩당 수량)
+        _unit_margin = new_unit_price - unit_cost if unit_cost > 0 else 0
+        _daily_margin = _unit_margin * _new_qty * (our_qty_per_pack or 1)
+        return {
+            "unit_price":    new_unit_price,
+            "total_price":   new_total,
+            "daily_qty":     round(_new_qty, 1),
+            "daily_margin":  round(_daily_margin),
+            "monthly_margin": round(_daily_margin * 30),
+            "unit_margin":   round(_unit_margin),
+        }
+
+    # 공격형: 최저가 -1원
+    aggr_unit = max(1, int(min_unit_price) - 1)
+    # 균형형: 최저가 +10%
+    bal_unit  = round(int(min_unit_price) * 1.10)
+    # 마진형: 평균가 (또는 최저가 +25%)
+    marg_unit = max(round(int(avg_unit_price)), round(int(min_unit_price) * 1.25))
+
+    return {
+        "aggressive": {
+            **_calc(aggr_unit),
+            "label": "🔴 공격형",
+            "color": "#ef4444",
+            "bg":    "#fef2f2",
+            "desc":  "최저가-1원 · 재고소진/노출 확보",
+        },
+        "balanced": {
+            **_calc(bal_unit),
+            "label": "🟡 균형형",
+            "color": "#f59e0b",
+            "bg":    "#fffbeb",
+            "desc":  "최저가+10% · 마진과 노출 균형",
+        },
+        "margin": {
+            **_calc(marg_unit),
+            "label": "🟢 마진형",
+            "color": "#22c55e",
+            "bg":    "#f0fdf4",
+            "desc":  "평균가 수준 · 마진 우선",
+        },
+    }
 
 
 def get_global_period() -> tuple:
@@ -4060,6 +4147,112 @@ def show_detail_analysis(data: dict, all_df):
             </div>
             """, unsafe_allow_html=True)
 
+    # ════════════════════════════════════════
+    # SECTION 2-B: 🎯 3시나리오 권장가 엔진 (D-2)
+    # ════════════════════════════════════════
+    if our_unit and comps:
+        _avg_unit_competitor = round(sum(c["개당가격"] for c in comps) / len(comps))
+        _min_unit_competitor = comps[0]["개당가격"]
+        _saved_cost = get_unit_cost(our_name)
+        # 일평균 출고량 추정 (예상 손실 카드와 동일 로직)
+        _scn_daily_qty = 0
+        try:
+            _ins = fetch_sales_insight()
+            for _a in _ins.get("anomalies", []) + _ins.get("watchlist", []):
+                if our_name and _a.get("product_id", "") in our_name:
+                    _scn_daily_qty = _a.get("avg_qty", 0)
+                    break
+        except Exception:
+            pass
+        if not _scn_daily_qty:
+            _scn_daily_qty = 10  # 기본값
+
+        with st.expander("🎯 권장가 시나리오 3종 (마진·재고 기반)", expanded=False):
+            # 원가 입력 라인
+            _cost_c1, _cost_c2 = st.columns([3, 1])
+            with _cost_c1:
+                _new_cost = st.number_input(
+                    f"💰 개당 원가 (저장값: {_saved_cost:,}원)" if _saved_cost else "💰 개당 원가 (미등록 — 마진 계산 위해 필수)",
+                    min_value=0, max_value=1_000_000, value=int(_saved_cost),
+                    step=10, key=f"_d2_cost_{our_name[:30]}_{our_rank}",
+                    help="개당 원가를 입력하면 마진·매출 시나리오가 정확해집니다. 저장하면 다음에 자동 불러옵니다.",
+                )
+            with _cost_c2:
+                if st.button("💾 원가 저장", key=f"_d2_cost_save_{our_rank}", width="stretch"):
+                    save_cost(our_name, _new_cost)
+                    st.success(f"✅ {_new_cost:,}원 저장")
+                    st.rerun()
+
+            _scn = compute_price_scenarios(
+                our_unit_price=int(our_unit),
+                our_qty_per_pack=int(our_qty) if our_qty else 1,
+                avg_qty_per_day=float(_scn_daily_qty),
+                min_unit_price=int(_min_unit_competitor),
+                avg_unit_price=int(_avg_unit_competitor),
+                unit_cost=int(_new_cost),
+            )
+
+            if not _new_cost:
+                st.warning("⚠️ 원가 미입력 — 가격/판매량만 표시 (마진은 0으로 표시됨)")
+
+            st.caption(f"📊 기준: 우리 {our_unit:,}원/개 · 최저 {_min_unit_competitor:,}원 · 평균 {_avg_unit_competitor:,}원 · 일평균 {_scn_daily_qty}개 · 가격탄력성 -10%→+20%")
+
+            _scn_cols = st.columns(3)
+            for _i, (_sid, _sd) in enumerate(_scn.items()):
+                with _scn_cols[_i]:
+                    _pkg_part = f"<div style='font-size:0.6rem;color:#94a3b8;'>(팩당 {_sd['total_price']:,}원)</div>" if our_qty and our_qty > 1 else ""
+                    _margin_color = "#16a34a" if _sd["daily_margin"] > 0 else "#94a3b8"
+                    _margin_html  = (f"<b style='color:{_margin_color};'>일 {_sd['daily_margin']:,}원</b>"
+                                     f"<br><span style='font-size:0.6rem;color:#888;'>월 {_sd['monthly_margin']:,}원</span>") if _new_cost else "<span style='color:#94a3b8;font-size:0.7rem;'>원가 입력 필요</span>"
+                    _card = (
+                        f'<div style="background:{_sd["bg"]};border:2px solid {_sd["color"]};border-radius:8px;padding:0.55rem 0.6rem;margin-bottom:0.4rem;">'
+                        f'<div style="font-size:0.78rem;font-weight:800;color:{_sd["color"]};margin-bottom:0.25rem;">{_sd["label"]}</div>'
+                        f'<div style="font-size:0.6rem;color:#64748b;margin-bottom:0.3rem;">{_sd["desc"]}</div>'
+                        f'<div style="font-size:1.05rem;font-weight:800;color:#1e293b;">{_sd["unit_price"]:,}<span style="font-size:0.7rem;color:#888;">원/개</span></div>'
+                        f'{_pkg_part}'
+                        f'<div style="border-top:1px dashed {_sd["color"]};margin:0.35rem 0;"></div>'
+                        f'<div style="font-size:0.65rem;color:#888;">📦 예상 일판매</div>'
+                        f'<div style="font-size:0.85rem;font-weight:700;color:#1e293b;">{_sd["daily_qty"]:.1f}개</div>'
+                        f'<div style="font-size:0.65rem;color:#888;margin-top:0.2rem;">💰 예상 마진</div>'
+                        f'<div style="font-size:0.78rem;">{_margin_html}</div>'
+                        f'</div>'
+                    )
+                    st.markdown(_card, unsafe_allow_html=True)
+                    # 시나리오별 케이스 생성 버튼
+                    _scn_case_key = f"_d2_scn_done_{_sid}_{our_rank}"
+                    if st.session_state.get(_scn_case_key):
+                        st.success("✅ 케이스됨", icon="✅")
+                    else:
+                        if st.button(f"📌 이 가격으로 케이스",
+                                     key=f"_d2_scn_btn_{_sid}_{our_rank}",
+                                     width="stretch"):
+                            try:
+                                save_case(
+                                    task={
+                                        "id": f"scn_{_sid}_{our_mall}_{our_rank}_{datetime.now(KST).strftime('%Y%m%d%H%M')}",
+                                        "title": our_name,
+                                        "meta": {
+                                            "product_id": our_name[:50],
+                                            "product_name": our_name,
+                                            "avg_qty": _scn_daily_qty,
+                                        },
+                                    },
+                                    action={
+                                        "type": "가격 인하",
+                                        "label": f"{_sd['label']} 권장가 적용",
+                                        "cause": f"{our_mall} {our_rank}위 D-2 시나리오",
+                                        "detail": f"개당 {_sd['unit_price']:,}원 (팩 {_sd['total_price']:,}원) — 예상 일{_sd['daily_qty']:.1f}개 · 일마진 {_sd['daily_margin']:,}원",
+                                        "memo": f"{_sd['desc']} / 원가 {_new_cost:,}원 / 변경전 {our_unit:,}원→{_sd['unit_price']:,}원",
+                                        "platforms": [our_mall],
+                                        "margin_impact": "확인필요",
+                                        "worker": "MD",
+                                    },
+                                )
+                                st.session_state[_scn_case_key] = True
+                                st.rerun()
+                            except Exception as _e:
+                                st.error(f"실패: {_e}")
+
     st.divider()
 
     # ════════════════════════════════════════
@@ -4638,7 +4831,9 @@ def show_detail_analysis(data: dict, all_df):
             for _k in list(st.session_state.keys()):
                 if (_k.startswith("_detail_case_done_")
                         or _k.startswith("_detail_tg_done_")
-                        or _k.startswith("_detail_memo_")):
+                        or _k.startswith("_detail_memo_")
+                        or _k.startswith("_d2_scn_done_")
+                        or _k.startswith("_d2_cost_")):
                     st.session_state.pop(_k, None)
             st.rerun()
 
