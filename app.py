@@ -779,6 +779,134 @@ def check_outcomes_7d():
 
 
 # ─────────────────────────────────────────────
+# 사례 7일 성과 자동 산출 (P2-A)
+# ─────────────────────────────────────────────
+def compute_case_outcome(case: dict) -> dict | None:
+    """사례의 action_date 이후 7일간 실제 출고량을 OneWMS에서 집계해 비교 결과 반환."""
+    pid = str(case.get("product_id", ""))
+    if not pid:
+        return None
+    try:
+        action_date = datetime.strptime(case.get("date", ""), "%Y-%m-%d")
+    except Exception:
+        return None
+    start = (action_date + timedelta(days=1)).strftime("%Y-%m-%d")
+    end   = (action_date + timedelta(days=7)).strftime("%Y-%m-%d")
+    orders = _fetch_orders_range(start, end)
+    after_qty = 0
+    for o in orders:
+        for op in o.get("order_products", []) or []:
+            if str(op.get("product_id", "")) == pid:
+                try:
+                    after_qty += int(float(str(op.get("qty", 0))))
+                except (ValueError, TypeError):
+                    pass
+    avg_qty = float(case.get("avg_qty", 0) or 0)
+    before_7d = avg_qty * 7
+    delta_pct = round((after_qty - before_7d) / before_7d * 100, 1) if before_7d > 0 else None
+    return {
+        "before_7d": round(before_7d, 1),
+        "after_7d":  after_qty,
+        "delta_pct": delta_pct,
+        "checked_at": datetime.now(KST).strftime("%Y-%m-%d %H:%M"),
+    }
+
+
+def recompute_pending_outcomes(force: bool = False) -> int:
+    """미산출 사례의 outcome_7d를 일괄 계산. 갱신 건수 반환."""
+    data = load_json(CASES_FILE, {"cases": []})
+    today = datetime.now(KST).strftime("%Y-%m-%d")
+    n = 0
+    for c in data.get("cases", []):
+        if c.get("outcome_date", "9999") > today:
+            continue
+        cur = c.get("outcome_7d")
+        # 이미 dict로 산출된 건은 force 시에만 재계산
+        if isinstance(cur, dict) and not force:
+            continue
+        result = compute_case_outcome(c)
+        if result is not None:
+            c["outcome_7d"] = result
+            n += 1
+    if n > 0:
+        save_json(CASES_FILE, data)
+    return n
+
+
+# ─────────────────────────────────────────────
+# 직원 성과 집계 (P2-B)
+# ─────────────────────────────────────────────
+def compute_worker_stats(days: int = 30) -> dict:
+    """최근 N일 사례 + 작업로그 기준 작업자별 집계."""
+    cutoff = (datetime.now(KST) - timedelta(days=days)).strftime("%Y-%m-%d")
+    cases = load_json(CASES_FILE, {"cases": []}).get("cases", [])
+    tasks = load_json(TASKS_FILE, {"tasks": []}).get("tasks", [])
+
+    by_worker: dict = {}
+
+    def _bucket(w: str):
+        if w not in by_worker:
+            by_worker[w] = {
+                "done_count": 0, "avg_response_min": [], "cause_counts": {},
+                "measured": 0, "positive": 0, "delta_sum": 0.0,
+            }
+        return by_worker[w]
+
+    # tasks 기반: 완료 건수 + 대응 시간
+    for t in tasks:
+        if not t.get("done"):
+            continue
+        if t.get("due", "") < cutoff:
+            continue
+        action = t.get("action", {}) or {}
+        worker = action.get("worker") or t.get("worker") or "MD"
+        b = _bucket(worker)
+        b["done_count"] += 1
+        try:
+            created = t.get("created_at") or (t.get("due", "") + " 09:00")
+            done_at = t.get("done_at", "")
+            if created and done_at:
+                c_dt = datetime.strptime(created[:16], "%Y-%m-%d %H:%M")
+                d_dt = datetime.strptime(done_at[:16], "%Y-%m-%d %H:%M")
+                mins = max(0, (d_dt - c_dt).total_seconds() / 60)
+                b["avg_response_min"].append(mins)
+        except Exception:
+            pass
+
+    # cases 기반: 원인 분포 + 회복률
+    for c in cases:
+        if c.get("date", "") < cutoff:
+            continue
+        worker = c.get("worker") or "MD"
+        b = _bucket(worker)
+        cause = c.get("cause") or "기타"
+        b["cause_counts"][cause] = b["cause_counts"].get(cause, 0) + 1
+        oc = c.get("outcome_7d")
+        if isinstance(oc, dict) and oc.get("delta_pct") is not None:
+            b["measured"] += 1
+            d = float(oc["delta_pct"])
+            b["delta_sum"] += d
+            if d > 0:
+                b["positive"] += 1
+
+    # 평균 정리
+    out = {}
+    for w, b in by_worker.items():
+        avg_min = round(sum(b["avg_response_min"]) / len(b["avg_response_min"]), 1) if b["avg_response_min"] else None
+        recovery = round(b["positive"] / b["measured"] * 100, 1) if b["measured"] else None
+        avg_delta = round(b["delta_sum"] / b["measured"], 1) if b["measured"] else None
+        out[w] = {
+            "done_count":    b["done_count"],
+            "avg_response_min": avg_min,
+            "measured":      b["measured"],
+            "recovery_rate": recovery,
+            "avg_delta_pct": avg_delta,
+            "cause_counts":  b["cause_counts"],
+        }
+    return out
+
+
+# ─────────────────────────────────────────────
 # 가격 이력 DB (P-A)
 # ─────────────────────────────────────────────
 def record_price_snapshot(keyword: str, df, our_df):
@@ -5165,16 +5293,18 @@ elif current_page == "daily_log":
     # ── 커스텀 CSS (리디자인) ──
     st.markdown("""
     <style>
-    /* ── KPI 요약 카드 ── */
-    .log-kpi-row { display: flex; gap: 0.4rem; margin-bottom: 0.6rem; }
+    /* ── KPI 요약 카드 (컴팩트) ── */
+    .log-kpi-row { display: flex; gap: 0.3rem; margin-bottom: 0.4rem; }
     .log-kpi {
-        flex: 1; border-radius: 10px; padding: 0.35rem 0.5rem; text-align: center;
-        box-shadow: 0 1px 4px rgba(0,0,0,0.06); position: relative; overflow: hidden;
+        flex: 1; border-radius: 7px; padding: 0.25rem 0.4rem;
+        display: flex; align-items: center; justify-content: center; gap: 0.3rem;
+        box-shadow: 0 1px 2px rgba(0,0,0,0.04); position: relative; overflow: hidden;
+        min-height: 28px;
     }
-    .log-kpi .kpi-icon { font-size: 0.95rem; }
-    .log-kpi .kpi-label { font-size: 0.65rem; color: #666; margin-top: 1px; }
-    .log-kpi .kpi-value { font-size: 1.05rem; font-weight: 800; margin: 1px 0; }
-    .log-kpi .kpi-sub { font-size: 0.6rem; color: #999; }
+    .log-kpi .kpi-icon { font-size: 0.85rem; }
+    .log-kpi .kpi-label { font-size: 0.7rem; color: #666; }
+    .log-kpi .kpi-value { font-size: 0.9rem; font-weight: 700; }
+    .log-kpi .kpi-sub { display: none; }
     .log-kpi.urgent { background: linear-gradient(135deg, #fff5f5, #ffe0e0); border: 1px solid #ffcdd2; }
     .log-kpi.urgent .kpi-value { color: #d32f2f; }
     .log-kpi.watch { background: linear-gradient(135deg, #fffbf0, #fff3e0); border: 1px solid #ffe0b2; }
@@ -5569,7 +5699,7 @@ elif current_page == "daily_log":
         st.toast("✅ 대응 기록 완료")
 
     # ── 3 Tabs ──
-    tab1, tab_log, tab2, tab3, tab_settings = st.tabs(["\U0001f4c5 오늘 업무", "\U0001f4ca 대응 로그", "\U0001f4c6 주간/월간 계획", "\U0001f4cc 공유 메모", "\u2699\ufe0f 설정"])
+    tab1, tab_log, tab_perf, tab2, tab3, tab_settings = st.tabs(["\U0001f4c5 오늘 업무", "\U0001f4ca 대응 로그", "\U0001f465 직원 성과", "\U0001f4c6 주간/월간 계획", "\U0001f4cc 공유 메모", "\u2699\ufe0f 설정"])
 
     # ════════════════════════════════════════════
     # Tab 1: 오늘 업무
@@ -5982,6 +6112,80 @@ elif current_page == "daily_log":
                 st.markdown(f'<div style="background:#fafafa;border-radius:10px;overflow:hidden;margin-bottom:0.5rem;">{_log_html}</div>', unsafe_allow_html=True)
         else:
             st.info("선택한 기간에 완료된 업무가 없습니다.")
+
+    # ════════════════════════════════════════════
+    # Tab 직원 성과 (P2-B)
+    # ════════════════════════════════════════════
+    with tab_perf:
+        st.markdown('<div class="section-title"><span class="icon">👥</span> 직원 성과 (최근 30일)</div>', unsafe_allow_html=True)
+
+        _pc1, _pc2 = st.columns([3, 1])
+        with _pc2:
+            if st.button("🔄 7일 결과 갱신", width="stretch", help="OneWMS에서 출고량을 조회해 사례 outcome_7d를 채웁니다."):
+                with st.spinner("OneWMS 조회 중..."):
+                    n_upd = recompute_pending_outcomes(force=False)
+                st.success(f"✅ {n_upd}건 갱신")
+                st.rerun()
+        with _pc1:
+            st.caption("**완료 건수 / 평균 대응 시간 / 회복률(7일 출고 +)** 기준 작업자별 집계. 회복률은 OneWMS 출고 데이터가 산출된 사례 한정.")
+
+        _stats = compute_worker_stats(days=30)
+        if not _stats:
+            st.info("최근 30일 데이터가 부족합니다. 업무 완료 후 자동 집계됩니다.")
+        else:
+            # 작업자별 카드
+            for worker, s in sorted(_stats.items(), key=lambda x: -x[1]["done_count"]):
+                _resp = f"{int(s['avg_response_min'])}분" if s["avg_response_min"] is not None else "—"
+                _rec  = f"{s['recovery_rate']}%" if s["recovery_rate"] is not None else "—"
+                _delta = f"{s['avg_delta_pct']:+.1f}%" if s["avg_delta_pct"] is not None else "—"
+                _cause_top = ""
+                if s["cause_counts"]:
+                    _top3 = sorted(s["cause_counts"].items(), key=lambda x: -x[1])[:3]
+                    _cause_top = " · ".join(f"{CAUSE_TYPES.get(k,k)} {v}" for k, v in _top3)
+                st.markdown(f"""
+                <div style="background:#fafafa;border:1px solid #e8e8e8;border-radius:10px;padding:0.7rem 1rem;margin-bottom:0.5rem;">
+                  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.4rem;">
+                    <div style="font-size:1rem;font-weight:800;">👤 {worker}</div>
+                    <div style="font-size:0.75rem;color:#888;">측정된 사례 {s['measured']}건</div>
+                  </div>
+                  <div style="display:flex;gap:0.6rem;">
+                    <div style="flex:1;text-align:center;background:#fff;border-radius:8px;padding:0.4rem;">
+                      <div style="font-size:0.7rem;color:#666;">완료 건수</div>
+                      <div style="font-size:1.1rem;font-weight:800;color:#2e7d32;">{s['done_count']}건</div>
+                    </div>
+                    <div style="flex:1;text-align:center;background:#fff;border-radius:8px;padding:0.4rem;">
+                      <div style="font-size:0.7rem;color:#666;">평균 대응 시간</div>
+                      <div style="font-size:1.1rem;font-weight:800;color:#1565c0;">{_resp}</div>
+                    </div>
+                    <div style="flex:1;text-align:center;background:#fff;border-radius:8px;padding:0.4rem;">
+                      <div style="font-size:0.7rem;color:#666;">회복률</div>
+                      <div style="font-size:1.1rem;font-weight:800;color:#5e35b1;">{_rec}</div>
+                    </div>
+                    <div style="flex:1;text-align:center;background:#fff;border-radius:8px;padding:0.4rem;">
+                      <div style="font-size:0.7rem;color:#666;">평균 출고 변화</div>
+                      <div style="font-size:1.1rem;font-weight:800;color:#e65100;">{_delta}</div>
+                    </div>
+                  </div>
+                  <div style="font-size:0.75rem;color:#666;margin-top:0.4rem;">📌 주요 원인: {_cause_top or '—'}</div>
+                </div>
+                """, unsafe_allow_html=True)
+
+            # 7일 결과가 산출된 사례 상세
+            _measured_cases = [
+                c for c in load_json(CASES_FILE, {"cases": []}).get("cases", [])
+                if isinstance(c.get("outcome_7d"), dict) and c["outcome_7d"].get("delta_pct") is not None
+            ]
+            if _measured_cases:
+                with st.expander(f"📊 측정된 사례 상세 ({len(_measured_cases)}건)", expanded=False):
+                    _measured_cases.sort(key=lambda x: x["outcome_7d"].get("delta_pct", 0), reverse=True)
+                    for c in _measured_cases[:30]:
+                        oc = c["outcome_7d"]
+                        d = oc.get("delta_pct", 0)
+                        _color = "#2e7d32" if d > 0 else ("#d32f2f" if d < 0 else "#888")
+                        st.markdown(f"- **{c.get('date','')}** · {c.get('product_name','')} ({c.get('worker','MD')}) — "
+                                    f"전 {oc.get('before_7d',0):.1f} → 후 {oc.get('after_7d',0)} "
+                                    f"<span style='color:{_color};font-weight:700'>({d:+.1f}%)</span>",
+                                    unsafe_allow_html=True)
 
     # ════════════════════════════════════════════
     # Tab 2: 주간/월간 계획 (리디자인)
