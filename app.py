@@ -660,6 +660,8 @@ PRICE_HISTORY_FILE  = os.path.join(DATA_DIR, "price_history.json")
 PINNED_SKUS_FILE    = os.path.join(DATA_DIR, "pinned_skus.json")
 WEEKLY_REPORT_FILE  = os.path.join(DATA_DIR, "weekly_report_state.json")
 COSTS_FILE          = os.path.join(DATA_DIR, "costs.json")  # D-2: SKU별 원가
+WATCHES_FILE        = os.path.join(DATA_DIR, "competitor_watches.json")  # D-4: 경쟁사 워치
+WATCH_STATE_FILE    = os.path.join(DATA_DIR, "competitor_watch_state.json")  # D-4: 마지막 체크 시간
 
 # ─────────────────────────────────────────────
 # 플랫폼 관리
@@ -1150,6 +1152,175 @@ def compute_price_scenarios(our_unit_price: int, our_qty_per_pack: int,
             "desc":  "평균가 수준 · 마진 우선",
         },
     }
+
+
+# ─────────────────────────────────────────────
+# D-4. 경쟁사 워치 + 변동 알림 + 신규 진입 감지
+# ─────────────────────────────────────────────
+def load_watches() -> list:
+    """경쟁사 가격 변동 워치 목록 로드."""
+    return load_json(WATCHES_FILE, {"watches": []}).get("watches", [])
+
+def save_watches(items: list):
+    save_json(WATCHES_FILE, {"watches": items})
+
+def add_or_update_watch(keyword: str, threshold_pct: int = 5,
+                        product_name: str = "", source_mall: str = "") -> dict:
+    """워치 등록(또는 임계값 갱신). baseline은 register_watch_baseline에서."""
+    items = load_watches()
+    found = next((w for w in items if w.get("keyword") == keyword), None)
+    now = datetime.now(KST).isoformat()
+    if found:
+        found["threshold_pct"] = threshold_pct
+        found["updated"] = now
+        if product_name:
+            found["product_name"] = product_name
+        if source_mall:
+            found["source_mall"] = source_mall
+    else:
+        found = {
+            "keyword": keyword,
+            "product_name": product_name,
+            "source_mall": source_mall,
+            "threshold_pct": threshold_pct,
+            "registered": now,
+            "updated": now,
+            "baseline_min": None,
+            "baseline_avg": None,
+            "baseline_top_shops": [],
+            "last_check": None,
+            "last_alert": None,
+            "active": True,
+        }
+        items.append(found)
+    save_watches(items)
+    return found
+
+def remove_watch(keyword: str):
+    items = [w for w in load_watches() if w.get("keyword") != keyword]
+    save_watches(items)
+
+def is_watching(keyword: str) -> bool:
+    return any(w.get("keyword") == keyword and w.get("active", True)
+               for w in load_watches())
+
+def _set_watch_baseline(watch: dict, df) -> dict:
+    """현재 가격을 baseline으로 기록."""
+    if df is None or len(df) == 0:
+        return watch
+    _top10 = df.head(10)
+    watch["baseline_min"] = int(_top10["가격(원)"].min())
+    watch["baseline_avg"] = int(_top10["가격(원)"].mean())
+    watch["baseline_top_shops"] = list(_top10["판매처"].astype(str).head(10).unique())
+    watch["last_check"] = datetime.now(KST).isoformat()
+    return watch
+
+def check_single_watch(watch: dict) -> dict | None:
+    """단일 워치 체크 → 알림 필요 시 dict 반환, 아니면 None."""
+    keyword = watch.get("keyword")
+    if not keyword:
+        return None
+    try:
+        df, _ = search_products(keyword)
+    except Exception:
+        return None
+    if df is None or len(df) == 0:
+        return None
+
+    items = load_watches()
+    target = next((w for w in items if w.get("keyword") == keyword), None)
+    if not target:
+        return None
+
+    _top10 = df.head(10)
+    cur_min = int(_top10["가격(원)"].min())
+    cur_avg = int(_top10["가격(원)"].mean())
+    cur_shops = list(_top10["판매처"].astype(str).unique())
+
+    # baseline이 없으면 기록만 하고 종료
+    if not target.get("baseline_min"):
+        _set_watch_baseline(target, df)
+        save_watches(items)
+        return None
+
+    threshold = target.get("threshold_pct", 5)
+    base_min = target["baseline_min"]
+    base_avg = target["baseline_avg"]
+    delta_min_pct = (cur_min - base_min) / base_min * 100 if base_min else 0
+    delta_avg_pct = (cur_avg - base_avg) / base_avg * 100 if base_avg else 0
+
+    alerts = []
+
+    # 변동 감지
+    if abs(delta_min_pct) >= threshold:
+        _icon = "📉" if delta_min_pct < 0 else "📈"
+        alerts.append(f"{_icon} 최저가 {base_min:,}→{cur_min:,}원 ({delta_min_pct:+.1f}%)")
+    if abs(delta_avg_pct) >= threshold:
+        _icon = "📉" if delta_avg_pct < 0 else "📈"
+        alerts.append(f"{_icon} 평균가 {base_avg:,}→{cur_avg:,}원 ({delta_avg_pct:+.1f}%)")
+
+    # 신규 진입 감지 (어제까지 없던 판매자가 Top10 진입)
+    base_shops = set(target.get("baseline_top_shops", []))
+    new_shops = [s for s in cur_shops if s not in base_shops and not is_our_store(s)]
+    if new_shops:
+        alerts.append(f"🆕 신규 진입: {', '.join(new_shops[:3])}")
+
+    target["last_check"] = datetime.now(KST).isoformat()
+
+    if alerts:
+        # 알림 발송 + baseline 갱신
+        msg_lines = [
+            f"🚨 *경쟁사 변동 감지* — {keyword}",
+            *alerts,
+            f"📊 임계값 ±{threshold}% · {datetime.now(KST).strftime('%m/%d %H:%M')}",
+        ]
+        if target.get("product_name"):
+            msg_lines.insert(1, f"상품: {target['product_name'][:50]}")
+        try:
+            send_telegram("\n".join(msg_lines))
+            target["last_alert"] = datetime.now(KST).isoformat()
+        except Exception:
+            pass
+        # baseline 갱신 (반복 알림 방지)
+        target["baseline_min"] = cur_min
+        target["baseline_avg"] = cur_avg
+        target["baseline_top_shops"] = cur_shops
+        save_watches(items)
+        return {
+            "keyword": keyword,
+            "alerts": alerts,
+            "cur_min": cur_min, "cur_avg": cur_avg,
+        }
+
+    save_watches(items)
+    return None
+
+def maybe_check_watches(min_interval_minutes: int = 60) -> int:
+    """앱 로드 시 호출 — 마지막 체크 후 N분 경과 시에만 전체 체크.
+    Returns: 알림 발송된 워치 개수.
+    """
+    state = load_json(WATCH_STATE_FILE, {"last_run": None})
+    last_run = state.get("last_run")
+    now = datetime.now(KST)
+    if last_run:
+        try:
+            _last_dt = datetime.fromisoformat(last_run)
+            if (now - _last_dt).total_seconds() < min_interval_minutes * 60:
+                return 0
+        except Exception:
+            pass
+
+    sent = 0
+    for w in load_watches():
+        if not w.get("active", True):
+            continue
+        result = check_single_watch(w)
+        if result:
+            sent += 1
+
+    state["last_run"] = now.isoformat()
+    save_json(WATCH_STATE_FILE, state)
+    return sent
 
 
 def get_global_period() -> tuple:
@@ -3929,9 +4100,16 @@ with st.sidebar:
         "📊 대시보드": "dashboard",
         "📦 판매대응 및 재고": "sales_inventory",
         "🛒 가격 모니터링": "price_monitor",
+        "🚨 경쟁사 워치": "competitor_watch",
         "📝 업무 일지": "daily_log",
         "🔍 상품 재발굴": "slow_moving",
     }
+    # 워치 활성 개수 뱃지
+    try:
+        _watch_count = sum(1 for w in load_watches() if w.get("active", True))
+    except Exception:
+        _watch_count = 0
+    _badges["competitor_watch"] = _watch_count
 
     if "current_page" not in st.session_state:
         st.session_state.current_page = "dashboard"
@@ -3997,6 +4175,14 @@ with st.sidebar:
 
     now = datetime.now(KST)
     st.caption(f"📅 {now.strftime('%Y년 %m월 %d일')}  ⏰ {now.strftime('%H:%M')}")
+
+    # ── D-4: 백그라운드 경쟁사 워치 자동 체크 (1시간 간격) ──
+    try:
+        _wsent = maybe_check_watches(min_interval_minutes=60)
+        if _wsent:
+            st.toast(f"🚨 경쟁사 워치 알림 {_wsent}건 발송", icon="📨")
+    except Exception:
+        pass
 
 
 # ─────────────────────────────────────────────
@@ -4665,6 +4851,83 @@ def show_detail_analysis(data: dict, all_df):
                                 {f'<div style="font-size:0.78rem; color:#555; margin-top:3px;">✍️ {example}</div>' if example else ''}
                             </div>
                             """, unsafe_allow_html=True)
+
+    # ════════════════════════════════════════
+    # SECTION 4-B: 📈 7일 가격 추이 (D-3) + 🚨 경쟁사 워치 등록 (D-4)
+    # ════════════════════════════════════════
+    _watch_keyword = (our_name or "")[:40]
+    _hist_for_chart = get_price_history(_watch_keyword, days=7) if _watch_keyword else []
+
+    _wc1, _wc2 = st.columns([2, 1])
+
+    # ── 7일 가격 추이 미니차트 (D-3) ──
+    with _wc1:
+        st.markdown("##### 📈 7일 가격 추이")
+        if len(_hist_for_chart) >= 2:
+            _hd = [h["date"] for h in _hist_for_chart]
+            _ht1 = [h.get("top1", {}).get("price", 0) for h in _hist_for_chart]
+            _ha  = [h.get("avg_top7", 0) for h in _hist_for_chart]
+            _ho  = [(h["our"][0]["price"] if h.get("our") else None) for h in _hist_for_chart]
+            _figh = go.Figure()
+            _figh.add_trace(go.Scatter(x=_hd, y=_ht1, name="1위", mode="lines+markers", line=dict(color="#ef5350", width=2)))
+            _figh.add_trace(go.Scatter(x=_hd, y=_ha,  name="Top7 평균", mode="lines+markers", line=dict(color="#90a4ae", width=2, dash="dot")))
+            if any(v is not None for v in _ho):
+                _figh.add_trace(go.Scatter(x=_hd, y=_ho, name="우리", mode="lines+markers", line=dict(color="#f59e0b", width=3)))
+            _figh.update_layout(
+                height=180,
+                margin=dict(t=10, b=20, l=10, r=10),
+                plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
+                font=dict(size=10),
+                legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1, font=dict(size=9)),
+            )
+            st.plotly_chart(_figh, width="stretch")
+        else:
+            st.caption("⏳ 가격이력 누적 중 — 가격모니터링 검색 시 자동 기록 (최소 2일치 필요)")
+
+    # ── 경쟁사 워치 등록/해제 (D-4) ──
+    with _wc2:
+        st.markdown("##### 🚨 경쟁사 워치")
+        _w_active = is_watching(_watch_keyword)
+        if _w_active:
+            _w_record = next((w for w in load_watches() if w.get("keyword") == _watch_keyword), {})
+            _w_thr = _w_record.get("threshold_pct", 5)
+            _w_last = _w_record.get("last_check", "")[:16].replace("T", " ") if _w_record.get("last_check") else "—"
+            st.success(f"✅ 워치 ON · ±{_w_thr}%")
+            st.caption(f"마지막 체크: {_w_last}")
+            if st.button("🛑 워치 해제", key=f"_d4_remove_{our_rank}", width="stretch"):
+                remove_watch(_watch_keyword)
+                st.rerun()
+        else:
+            _w_thr_new = st.selectbox(
+                "변동 임계값",
+                options=[3, 5, 10],
+                index=1,
+                format_func=lambda x: f"±{x}%",
+                key=f"_d4_thr_{our_rank}",
+            )
+            if st.button("🔔 워치 등록", key=f"_d4_add_{our_rank}", width="stretch", type="primary"):
+                add_or_update_watch(
+                    keyword=_watch_keyword,
+                    threshold_pct=int(_w_thr_new),
+                    product_name=our_name,
+                    source_mall=our_mall,
+                )
+                # 즉시 baseline 기록
+                try:
+                    _df_now, _ = search_products(_watch_keyword)
+                    if _df_now is not None and len(_df_now) > 0:
+                        _items = load_watches()
+                        _t = next((w for w in _items if w.get("keyword") == _watch_keyword), None)
+                        if _t:
+                            _set_watch_baseline(_t, _df_now)
+                            save_watches(_items)
+                except Exception:
+                    pass
+                st.success(f"✅ 워치 등록 — ±{_w_thr_new}% 변동 시 텔레그램 알림")
+                st.rerun()
+            st.caption("등록 시 현재 가격을 기준으로 1시간마다 자동 체크")
+
+    st.divider()
 
     # ════════════════════════════════════════
     # SECTION 5: ⚡ 실행 액션 패널 (D-1)
@@ -5687,6 +5950,171 @@ elif current_page == "sales_inventory":
         st.info("📡 원싱크(OneWMS) API 연동 후 판매 대응 분석이 가능합니다.")
     else:
         st.info(f"📊 판매 인사이트: {insight_data['status']}")
+
+
+# ─────────────────────────────────────────────
+# 🚨 경쟁사 워치 페이지 (D-4)
+# ─────────────────────────────────────────────
+elif current_page == "competitor_watch":
+    st.markdown('<div class="section-title"><span class="icon">🚨</span> 경쟁사 워치 + 변동 알림</div>', unsafe_allow_html=True)
+    st.caption("등록된 키워드의 Top10 최저가/평균가/판매처를 주기적으로 비교해, 임계값 초과 시 텔레그램으로 알립니다.")
+
+    _watches = load_watches()
+    _active_cnt = sum(1 for w in _watches if w.get("active", True))
+    _alert_today_cnt = 0
+    _today_str = datetime.now(KST).strftime("%Y-%m-%d")
+    for w in _watches:
+        _la = w.get("last_alert") or ""
+        if _la.startswith(_today_str):
+            _alert_today_cnt += 1
+
+    _state = load_json(WATCH_STATE_FILE, {"last_run": None})
+    _last_run = _state.get("last_run")
+    _last_run_disp = "-"
+    if _last_run:
+        try:
+            _last_run_disp = datetime.fromisoformat(_last_run).strftime("%m/%d %H:%M")
+        except Exception:
+            _last_run_disp = _last_run[:16]
+
+    _k1, _k2, _k3, _k4 = st.columns(4)
+    _k1.metric("등록 워치", f"{len(_watches)}개")
+    _k2.metric("활성 워치", f"{_active_cnt}개")
+    _k3.metric("오늘 알림", f"{_alert_today_cnt}건")
+    _k4.metric("마지막 체크", _last_run_disp)
+
+    st.markdown("---")
+
+    # 새 워치 추가
+    with st.expander("➕ 새 워치 추가", expanded=(len(_watches) == 0)):
+        _f1, _f2, _f3 = st.columns([3, 2, 1])
+        _new_kw = _f1.text_input("키워드", key="new_watch_keyword", placeholder="예: 닥터노아 칫솔")
+        _new_th = _f2.selectbox("임계값", [3, 5, 7, 10, 15, 20], index=1,
+                                format_func=lambda x: f"±{x}%", key="new_watch_threshold")
+        if _f3.button("등록", key="new_watch_add", use_container_width=True):
+            if not _new_kw.strip():
+                st.warning("키워드를 입력하세요.")
+            else:
+                _w = add_or_update_watch(_new_kw.strip(), threshold_pct=int(_new_th))
+                # baseline 즉시 기록
+                try:
+                    _df0, _ = search_products(_new_kw.strip())
+                    if _df0 is not None and len(_df0) > 0:
+                        _items = load_watches()
+                        _t = next((x for x in _items if x.get("keyword") == _new_kw.strip()), None)
+                        if _t:
+                            _set_watch_baseline(_t, _df0)
+                            save_watches(_items)
+                        st.success(f"✅ '{_new_kw}' 워치 등록 + baseline 기록 완료")
+                    else:
+                        st.warning("등록은 되었으나 검색 결과가 없어 baseline을 기록하지 못했습니다.")
+                except Exception as _e:
+                    st.warning(f"등록은 되었으나 baseline 기록 실패: {_e}")
+                st.rerun()
+
+    # 전체 즉시 체크
+    _b1, _b2 = st.columns([1, 4])
+    if _b1.button("🔄 전체 즉시 체크", key="watch_check_all", use_container_width=True):
+        _sent = 0
+        with st.spinner("전체 워치 체크 중..."):
+            for w in load_watches():
+                if not w.get("active", True):
+                    continue
+                _r = check_single_watch(w)
+                if _r:
+                    _sent += 1
+            # 강제 갱신: state 업데이트
+            save_json(WATCH_STATE_FILE, {"last_run": datetime.now(KST).isoformat()})
+        if _sent:
+            st.success(f"✅ 체크 완료 — {_sent}건 알림 발송")
+        else:
+            st.info("✅ 체크 완료 — 임계값 초과 변동 없음")
+        st.rerun()
+
+    st.markdown("---")
+
+    if not _watches:
+        st.info("등록된 워치가 없습니다. 위에서 키워드를 추가하거나, 상품 상세분석 모달의 '경쟁사 워치 등록' 버튼을 사용하세요.")
+    else:
+        for _idx, _w in enumerate(_watches):
+            _kw = _w.get("keyword", "")
+            _bm = _w.get("baseline_min")
+            _ba = _w.get("baseline_avg")
+            _th = _w.get("threshold_pct", 5)
+            _lc = _w.get("last_check")
+            _la = _w.get("last_alert")
+            _lc_disp = "-"
+            if _lc:
+                try:
+                    _lc_disp = datetime.fromisoformat(_lc).strftime("%m/%d %H:%M")
+                except Exception:
+                    _lc_disp = _lc[:16]
+            _la_disp = "-"
+            if _la:
+                try:
+                    _la_disp = datetime.fromisoformat(_la).strftime("%m/%d %H:%M")
+                except Exception:
+                    _la_disp = _la[:16]
+
+            _active = _w.get("active", True)
+            _border = "#16a34a" if _active else "#94a3b8"
+            with st.container(border=True):
+                _h1, _h2, _h3 = st.columns([3, 2, 2])
+                _status = "✅ 활성" if _active else "⏸ 비활성"
+                _h1.markdown(f"**{_kw}** &nbsp; <span style='color:{_border};font-size:12px;'>{_status}</span>", unsafe_allow_html=True)
+                if _w.get("product_name"):
+                    _h1.caption(f"📦 {_w.get('product_name')[:60]}")
+                _h2.caption(f"임계값 ±{_th}% · 마지막 체크 {_lc_disp}")
+                _h3.caption(f"마지막 알림: {_la_disp}")
+
+                _m1, _m2, _m3 = st.columns(3)
+                _m1.metric("Baseline 최저가", f"{_bm:,}원" if _bm else "-")
+                _m2.metric("Baseline 평균가", f"{_ba:,}원" if _ba else "-")
+                _m3.metric("Baseline 판매처", f"{len(_w.get('baseline_top_shops', []))}곳")
+
+                if _w.get("baseline_top_shops"):
+                    with st.expander("📋 Baseline Top 판매처", expanded=False):
+                        st.write(", ".join(_w.get("baseline_top_shops", [])[:10]))
+
+                _ac1, _ac2, _ac3, _ac4 = st.columns(4)
+                if _ac1.button("🔄 즉시 체크", key=f"watch_chk_{_idx}", use_container_width=True):
+                    with st.spinner("체크 중..."):
+                        _r = check_single_watch(_w)
+                    if _r:
+                        st.success("🚨 변동 감지 — 텔레그램 발송 완료\n\n" + "\n".join(_r["alerts"]))
+                    else:
+                        st.info("✅ 임계값 초과 변동 없음")
+                    st.rerun()
+
+                if _ac2.button("📐 Baseline 재설정", key=f"watch_rebase_{_idx}", use_container_width=True):
+                    try:
+                        _df1, _ = search_products(_kw)
+                        if _df1 is not None and len(_df1) > 0:
+                            _items = load_watches()
+                            _t = next((x for x in _items if x.get("keyword") == _kw), None)
+                            if _t:
+                                _set_watch_baseline(_t, _df1)
+                                save_watches(_items)
+                            st.success("✅ Baseline 재설정 완료")
+                        else:
+                            st.warning("검색 결과 없음")
+                    except Exception as _e:
+                        st.error(f"실패: {_e}")
+                    st.rerun()
+
+                _toggle_label = "⏸ 비활성화" if _active else "▶ 활성화"
+                if _ac3.button(_toggle_label, key=f"watch_toggle_{_idx}", use_container_width=True):
+                    _items = load_watches()
+                    _t = next((x for x in _items if x.get("keyword") == _kw), None)
+                    if _t:
+                        _t["active"] = not _active
+                        save_watches(_items)
+                    st.rerun()
+
+                if _ac4.button("🛑 워치 해제", key=f"watch_del_{_idx}", use_container_width=True):
+                    remove_watch(_kw)
+                    st.success(f"'{_kw}' 워치 해제됨")
+                    st.rerun()
 
 
 # ─────────────────────────────────────────────
