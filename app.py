@@ -4220,6 +4220,140 @@ def show_detail_analysis(data: dict, all_df):
                             </div>
                             """, unsafe_allow_html=True)
 
+    # ════════════════════════════════════════
+    # SECTION 5: ⚡ 실행 액션 패널 (D-1)
+    # ════════════════════════════════════════
+    st.markdown("")
+    st.markdown('#### ⚡ 실행 액션')
+
+    # 권장가 재계산
+    _act_cheapest = comps[0] if comps else None
+    _act_rec_unit = round(_act_cheapest["개당가격"] * 1.1) if _act_cheapest else 0
+    _act_rec_total = round(_act_rec_unit * our_qty) if (our_qty and _act_rec_unit) else our_price
+
+    _ax1, _ax2 = st.columns(2)
+
+    # ── 액션 1: 권장가 클립보드 ──
+    with _ax1:
+        with st.expander("📋 권장가 복사", expanded=False):
+            if _act_cheapest and our_unit and our_unit > _act_cheapest["개당가격"]:
+                _ax_unit_diff = our_unit - _act_cheapest["개당가격"]
+                _price_text = (
+                    f"[가격 인하 안내]\n"
+                    f"상품: {our_name}\n"
+                    f"매장: {our_mall} ({our_rank}위)\n"
+                    f"현재가: {our_price:,}원 (개당 {our_unit:,}원)\n"
+                    f"권장가: {_act_rec_total:,}원 (개당 {_act_rec_unit:,}원)\n"
+                    f"근거: 최저가 {_act_cheapest['개당가격']:,}원 +10% / 차이 -{_ax_unit_diff:,}원"
+                )
+                st.code(_price_text, language=None)
+                st.caption("우측 상단 복사 버튼 클릭 → 스마트스토어 백오피스 붙여넣기")
+            else:
+                st.info("가격 경쟁력 확보됨 — 인하 권장 없음")
+
+    # ── 액션 2: 상품명 개선안 복사 ──
+    with _ax2:
+        with st.expander("📝 상품명 개선안 복사", expanded=False):
+            if suggestions:
+                _name_text = "\n".join([f"- {s}" for s in suggestions[:8]])
+                st.code(f"[상품명 개선안 — {our_name}]\n현재: {our_name}\n\n개선 포인트:\n{_name_text}", language=None)
+                st.caption("개선안을 참고해 새 상품명으로 수정")
+            elif issues:
+                st.code(f"[수정 필요 — {our_name}]\n" + "\n".join([f"- {i}" for i in issues]), language=None)
+            else:
+                st.info("상품명 양호 — 개선안 없음")
+
+    _ax3, _ax4, _ax5 = st.columns([1, 1, 1])
+
+    # ── 액션 3: 케이스 자동 등록 ──
+    with _ax3:
+        _case_key_active = f"_detail_case_done_{our_name[:30]}_{our_rank}"
+        if st.session_state.get(_case_key_active):
+            st.success("✅ 케이스 등록됨")
+        else:
+            if st.button("📌 케이스 등록", key="detail_act_case", width="stretch"):
+                try:
+                    _action_label = "가격 인하" if (_act_cheapest and our_unit > _act_cheapest["개당가격"]) else "상품명 개선"
+                    _detail_text = (
+                        f"권장가 {_act_rec_total:,}원 (개당 {_act_rec_unit:,}원)"
+                        if _action_label == "가격 인하"
+                        else (suggestions[0] if suggestions else (issues[0] if issues else "검토"))
+                    )
+                    save_case(
+                        task={
+                            "id": f"detail_{our_mall}_{our_rank}_{datetime.now(KST).strftime('%Y%m%d%H%M')}",
+                            "title": our_name,
+                            "meta": {
+                                "product_id": our_name[:50],
+                                "product_name": our_name,
+                                "avg_qty": 0,
+                            },
+                        },
+                        action={
+                            "type": _action_label,
+                            "label": _action_label,
+                            "cause": f"{our_mall} {our_rank}위 상세분석",
+                            "detail": _detail_text,
+                            "memo": f"우리 {our_price:,}원 / 최저 {_act_cheapest['개당가격']*our_qty if (_act_cheapest and our_qty) else 0:,}원",
+                            "platforms": [our_mall],
+                            "margin_impact": "확인필요",
+                            "worker": "MD",
+                        },
+                    )
+                    st.session_state[_case_key_active] = True
+                    st.rerun()
+                except Exception as _e:
+                    st.error(f"케이스 등록 실패: {_e}")
+
+    # ── 액션 4: 경쟁사 CSV 다운로드 ──
+    with _ax4:
+        try:
+            _csv_rows = [{"순위": int(r["순위"]), "판매처": r["판매처"], "상품명": r.get("상품명", ""),
+                          "가격": int(r.get("가격(원)", 0)), "링크": r.get("링크", "")}
+                         for _, r in all_df.head(10).iterrows()] if all_df is not None and len(all_df) > 0 else []
+            if _csv_rows:
+                _csv_df = pd.DataFrame(_csv_rows)
+                _csv_bytes = _csv_df.to_csv(index=False, encoding="utf-8-sig").encode("utf-8-sig")
+                _stamp = datetime.now(KST).strftime("%Y%m%d_%H%M")
+                st.download_button(
+                    label="📥 경쟁사 CSV",
+                    data=_csv_bytes,
+                    file_name=f"competitor_{our_mall}_{_stamp}.csv",
+                    mime="text/csv",
+                    key="detail_act_csv",
+                    width="stretch",
+                )
+            else:
+                st.button("📥 경쟁사 CSV", disabled=True, width="stretch", key="detail_act_csv_d")
+        except Exception:
+            st.button("📥 경쟁사 CSV", disabled=True, width="stretch", key="detail_act_csv_e")
+
+    # ── 액션 5: 텔레그램 전송 ──
+    with _ax5:
+        _tg_key_active = f"_detail_tg_done_{our_name[:30]}_{our_rank}"
+        if st.session_state.get(_tg_key_active):
+            st.success("✅ 전송됨")
+        else:
+            if st.button("📨 텔레그램 전송", key="detail_act_tg", width="stretch"):
+                try:
+                    _tg_lines = [
+                        f"🔬 *상세분석 액션* — {our_mall} ({our_rank}위)",
+                        f"상품: {our_name[:50]}",
+                        f"현재: {our_price:,}원 (개당 {our_unit:,}원)" if our_unit else f"현재: {our_price:,}원",
+                    ]
+                    if _act_cheapest and our_unit and our_unit > _act_cheapest["개당가격"]:
+                        _tg_lines.append(f"💰 권장가: {_act_rec_total:,}원 (개당 {_act_rec_unit:,}원)")
+                        _tg_lines.append(f"📉 최저가 {_act_cheapest['개당가격']:,}원 대비 +{round((our_unit/_act_cheapest['개당가격']-1)*100)}%")
+                    if issues:
+                        _tg_lines.append(f"📝 상품명: {issues[0][:60]}")
+                    if our_link and our_link != "#":
+                        _tg_lines.append(f"🔗 {our_link}")
+                    send_telegram("\n".join(_tg_lines))
+                    st.session_state[_tg_key_active] = True
+                    st.rerun()
+                except Exception as _e:
+                    st.error(f"전송 실패: {_e}")
+
     # ── 닫기 버튼 (다이얼로그 종료) ──
     st.markdown("---")
     _close_c1, _close_c2, _close_c3 = st.columns([1, 1, 1])
@@ -4227,6 +4361,10 @@ def show_detail_analysis(data: dict, all_df):
         if st.button("✖ 닫기", key="detail_modal_close", width="stretch", type="primary"):
             for _i in range(10):
                 st.session_state.pop(f"show_detail_{_i}", None)
+            # 액션 완료 플래그도 정리
+            for _k in list(st.session_state.keys()):
+                if _k.startswith("_detail_case_done_") or _k.startswith("_detail_tg_done_"):
+                    st.session_state.pop(_k, None)
             st.rerun()
 
 
