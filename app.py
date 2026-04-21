@@ -2832,22 +2832,79 @@ def _detect_platform(url: str) -> str:
 
 
 def _parse_pdp_html(url: str) -> dict:
-    """상품 상세페이지 HTML 파싱 → CTA 분석 데이터 추출."""
+    """상품 상세페이지 HTML 파싱 → CTA 분석 데이터 추출.
+
+    봇 차단이 강한 플랫폼(쿠팡/11번가/G마켓/옥션/롯데온)은 ScraperAPI 자동 사용.
+    스마트스토어 등은 직접 요청 시도 후 실패 시 ScraperAPI 폴백.
+    """
     import re, json as _json
-    result = {"url": url, "platform": _detect_platform(url), "error": None}
-    try:
+    _platform = _detect_platform(url)
+    result = {"url": url, "platform": _platform, "error": None,
+              "fetch_via": "direct", "html_size": 0}
+
+    # 봇 차단 강한 플랫폼은 ScraperAPI 우선 사용
+    _BLOCKED_PLATFORMS = {"쿠팡", "11번가", "G마켓", "옥션", "롯데온", "인터파크"}
+    _use_scraperapi = _platform in _BLOCKED_PLATFORMS
+    _api_key = get_scraperapi_key()
+
+    html = ""
+
+    def _fetch_direct(_url):
         _headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
             "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
             "Accept-Language": "ko-KR,ko;q=0.9,en-US;q=0.8",
             "Referer": "https://www.google.com/",
         }
-        _resp = requests.get(url, headers=_headers, timeout=12, allow_redirects=True)
-        _resp.encoding = _resp.apparent_encoding or "utf-8"
-        html = _resp.text
+        _r = requests.get(_url, headers=_headers, timeout=12, allow_redirects=True)
+        _r.encoding = _r.apparent_encoding or "utf-8"
+        return _r.text or ""
+
+    def _fetch_scraperapi(_url):
+        if not _api_key:
+            return ""
+        _api = f"http://api.scraperapi.com?api_key={_api_key}&url={_url}&country_code=kr&render=true"
+        _r = requests.get(_api, timeout=60)
+        return _r.text if _r.status_code == 200 else ""
+
+    try:
+        if _use_scraperapi and _api_key:
+            html = _fetch_scraperapi(url)
+            result["fetch_via"] = "scraperapi"
+            # ScraperAPI 실패 시 직접 시도
+            if len(html) < 5000:
+                _fallback = _fetch_direct(url)
+                if len(_fallback) > len(html):
+                    html = _fallback
+                    result["fetch_via"] = "direct(fallback)"
+        else:
+            html = _fetch_direct(url)
+            # 차단으로 의심되면 ScraperAPI 폴백
+            if (len(html) < 5000 or "captcha" in html.lower() or "blocked" in html.lower()) and _api_key:
+                _fallback = _fetch_scraperapi(url)
+                if len(_fallback) > len(html):
+                    html = _fallback
+                    result["fetch_via"] = "scraperapi(fallback)"
     except Exception as _e:
-        result["error"] = str(_e)
-        return result
+        # 직접 실패 시 ScraperAPI 시도
+        try:
+            if _api_key:
+                html = _fetch_scraperapi(url)
+                result["fetch_via"] = "scraperapi(after error)"
+            else:
+                result["error"] = str(_e)
+                return result
+        except Exception as _e2:
+            result["error"] = f"{_e} / {_e2}"
+            return result
+
+    result["html_size"] = len(html)
+    if len(html) < 2000:
+        result["error"] = (
+            f"페이지 응답이 비정상적으로 작음 ({len(html):,}자) — "
+            f"봇 차단 또는 잘못된 URL일 가능성. "
+            f"{'ScraperAPI 키 등록 권장' if not _api_key else 'JS 렌더링 필요'}"
+        )
 
     from bs4 import BeautifulSoup
     soup = BeautifulSoup(html, "html.parser")
@@ -3269,18 +3326,30 @@ def show_page_analysis_dialog():
     if _do_analyze:
         # 이전 결과 초기화
         st.session_state.pop("_cta_last_result", None)
-        with st.spinner(f"📡 {_selected['shop']} 페이지 분석 중... (최대 15초)"):
+        with st.spinner(f"📡 {_selected['shop']} 페이지 분석 중... (최대 60초)"):
             _parsed = _parse_pdp_html(_selected["url"])
             _scored = _score_pdp(_parsed)
             # 실제 상품 데이터 기반 개선 예시 생성
             _scored["scores"] = _enrich_with_examples(
                 _scored.get("scores", {}), _parsed, pname, brand)
         st.session_state["_cta_last_result"] = {
-            "shop": _selected["shop"], "url": _selected["url"], "result": _scored
+            "shop": _selected["shop"], "url": _selected["url"], "result": _scored,
+            "parsed": _parsed,  # 진단 정보 보관
         }
 
     _result = st.session_state.get("_cta_last_result")
     if _result and _result.get("url") == _selected["url"]:
+        # 진단 배너 — 어떤 경로로 가져왔고 응답 크기 얼마인지
+        _p = _result.get("parsed", {}) or {}
+        _via = _p.get("fetch_via", "?")
+        _hs  = _p.get("html_size", 0)
+        _err = _p.get("error")
+        if _err:
+            st.error(f"⚠️ 페이지 가져오기 실패: {_err}\n\n경로: {_via} · HTML {_hs:,}자")
+            st.caption("→ 버튼 '🔗 페이지 직접 열기'로 수동 확인 권장")
+        else:
+            _badge = "✅" if _hs >= 50000 else ("⚠️" if _hs >= 10000 else "🚨")
+            st.caption(f"{_badge} 가져오기 경로: **{_via}** · HTML 크기 **{_hs:,}자** · 플랫폼 {_p.get('platform','?')}")
         _render_cta_scores(_result)
 
 
