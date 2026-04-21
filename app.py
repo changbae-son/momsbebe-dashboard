@@ -4896,24 +4896,42 @@ elif current_page == "sales_inventory":
 
             # 상품 검색/선택 → 판매처 상세
             product_names_list = list(product_map.keys())
+            _options = [""] + product_names_list
 
-            # 업무보드에서 바로 이동 시 자동 선택 (셀렉트박스 그려지기 전 세팅)
+            # 셸로우 상태변수 (위젯 키와 분리해서 자유롭게 수정 가능)
+            _sel_var = f"{tab_prefix}_selected_name"
+            if _sel_var not in st.session_state:
+                st.session_state[_sel_var] = ""
+
+            # 업무보드에서 바로 이동 시 자동 선택
             _auto_pid = st.session_state.pop("auto_select_product", None)
             if _auto_pid:
                 _auto_name = product_names_map.get(_auto_pid, _auto_pid)
                 if _auto_name in product_map:
-                    st.session_state[f"{tab_prefix}_select"] = _auto_name
+                    st.session_state[_sel_var] = _auto_name
+
+            # 초기 index 계산
+            try:
+                _init_idx = _options.index(st.session_state[_sel_var])
+            except ValueError:
+                _init_idx = 0
+                st.session_state[_sel_var] = ""
 
             # ── 셀렉트박스 (리스트 위) ──
             sel_cols = st.columns([4, 1])
             with sel_cols[0]:
                 selected_name = st.selectbox(
                     "상품 선택",
-                    options=[""] + product_names_list,
+                    options=_options,
+                    index=_init_idx,
                     format_func=lambda x: "🔍 상품명을 입력하여 검색..." if x == "" else x,
-                    key=f"{tab_prefix}_select",
+                    key=f"{tab_prefix}_select_widget",
                     label_visibility="collapsed",
                 )
+            # 사용자가 셀렉트박스에서 직접 변경한 값을 셸로우 상태와 동기화
+            if selected_name != st.session_state[_sel_var]:
+                st.session_state[_sel_var] = selected_name
+
             with sel_cols[1]:
                 btn_disabled = (selected_name == "" or selected_name not in product_map)
                 if st.button("📊 판매처 상세", key=f"{tab_prefix}_btn", width="stretch", disabled=btn_disabled):
@@ -4937,7 +4955,7 @@ elif current_page == "sales_inventory":
                 key=f"{tab_prefix}_df",
             )
 
-            # 행 클릭 → 셀렉트박스 갱신 (셀렉트박스가 위에 이미 그려졌으므로 rerun 필요)
+            # 행 클릭 → 셸로우 상태에 기록 후 rerun (위젯 키는 절대 직접 수정하지 않음)
             try:
                 _sel_rows = list(_evt.selection.rows) if _evt and hasattr(_evt, "selection") else []
             except Exception:
@@ -4948,7 +4966,7 @@ elif current_page == "sales_inventory":
                 if 0 <= _sel_idx < len(table_rows) and st.session_state.get(_last_click_key) != _sel_idx:
                     _clicked_name = table_rows[_sel_idx]["상품명"]
                     if _clicked_name in product_map:
-                        st.session_state[f"{tab_prefix}_select"] = _clicked_name
+                        st.session_state[_sel_var] = _clicked_name
                         st.session_state[_last_click_key] = _sel_idx
                         st.rerun()
             else:
