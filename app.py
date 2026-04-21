@@ -2899,12 +2899,20 @@ def _parse_pdp_html(url: str) -> dict:
             return result
 
     result["html_size"] = len(html)
+    result["scraperapi_available"] = bool(_api_key)
     if len(html) < 2000:
-        result["error"] = (
-            f"페이지 응답이 비정상적으로 작음 ({len(html):,}자) — "
-            f"봇 차단 또는 잘못된 URL일 가능성. "
-            f"{'ScraperAPI 키 등록 권장' if not _api_key else 'JS 렌더링 필요'}"
-        )
+        if not _api_key:
+            result["error"] = (
+                f"페이지 응답이 너무 작음 ({len(html):,}자) — 봇 차단 가능성.\n"
+                f"💡 해결: st.secrets의 [scraperapi] api_key 등록 필요 "
+                f"(쿠팡/11번가/G마켓 등은 직접 요청 차단됨)"
+            )
+        else:
+            result["error"] = (
+                f"페이지 응답이 너무 작음 ({len(html):,}자) — ScraperAPI 사용했으나 실패.\n"
+                f"💡 가능 원인: ① ScraperAPI 크레딧 소진 ② URL 만료/리다이렉트 "
+                f"③ 플랫폼이 헤드리스 브라우저까지 차단 ④ 상품 페이지 비공개"
+            )
 
     from bs4 import BeautifulSoup
     soup = BeautifulSoup(html, "html.parser")
@@ -3328,10 +3336,33 @@ def show_page_analysis_dialog():
         else:
             return
 
-    _disp = [f"{u['shop']}  {'· '+str(u['qty'])+'개 판매' if u['qty'] else ''}" for u in _url_list]
+    # 상품코드 추출 (URL 끝의 5자리 이상 숫자 — 쿠팡 vendorItemId, 스마트스토어 productId 등)
+    import re as _re_code
+    def _extract_pcode(_u: str) -> str:
+        if not _u:
+            return ""
+        # 쿠팡: vendorItemId=12345
+        _m = _re_code.search(r'vendorItemId=(\d+)', _u)
+        if _m: return _m.group(1)
+        # 쿠팡 products/숫자
+        _m = _re_code.search(r'/products/(\d+)', _u)
+        if _m: return _m.group(1)
+        # 스마트스토어/일반: 끝의 5자리+ 숫자
+        _m = _re_code.search(r'(\d{5,})(?:[?&]|$|/\s*$)', _u)
+        return _m.group(1) if _m else ""
+
+    _disp = []
+    for u in _url_list:
+        _qty_part = f"· {u['qty']}개 판매" if u['qty'] else ""
+        _code = _extract_pcode(u['url'])
+        _code_part = f"[{_code}]" if _code else ""
+        _disp.append(f"{u['shop']}  {_qty_part}  {_code_part}".strip())
     _sel_idx = st.selectbox("분석할 판매처 선택", range(len(_disp)),
                             format_func=lambda i: _disp[i], key="_pdp_url_sel")
     _selected = _url_list[_sel_idx]
+    _selected_code = _extract_pcode(_selected["url"])
+    if _selected_code:
+        st.caption(f"📦 상품코드 `{_selected_code}` · {_selected['url'][:80]}{'…' if len(_selected['url'])>80 else ''}")
 
     _c1, _c2 = st.columns(2)
     with _c1:
