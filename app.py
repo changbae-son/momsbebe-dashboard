@@ -4894,47 +4894,17 @@ elif current_page == "sales_inventory":
             if show_today_col:
                 col_config["오늘출고"] = st.column_config.TextColumn("오늘출고", width="small")
 
-            # 테이블 표시 + 행 클릭 이벤트
-            _evt = st.dataframe(
-                df, width="stretch", hide_index=True,
-                column_config=col_config,
-                height=min(len(table_rows) * 35 + 60, 600),
-                on_select="rerun",
-                selection_mode="single-row",
-                key=f"{tab_prefix}_df",
-            )
-
             # 상품 검색/선택 → 판매처 상세
             product_names_list = list(product_map.keys())
 
-            # 업무보드에서 바로 이동 시 자동 선택
+            # 업무보드에서 바로 이동 시 자동 선택 (셀렉트박스 그려지기 전 세팅)
             _auto_pid = st.session_state.pop("auto_select_product", None)
-            _default_name = ""
             if _auto_pid:
                 _auto_name = product_names_map.get(_auto_pid, _auto_pid)
                 if _auto_name in product_map:
-                    _default_name = _auto_name
-                    st.session_state[f"{tab_prefix}_select"] = _default_name
+                    st.session_state[f"{tab_prefix}_select"] = _auto_name
 
-            # 테이블 행 클릭 → 셀렉트박스 자동 선택
-            # st.dataframe(on_select='rerun')가 이미 rerun을 일으키므로 추가 rerun 불필요.
-            # 셀렉트박스가 아직 그려지기 전이므로 session_state[key]에 미리 써두면 초기값으로 잡힘.
-            try:
-                _sel_rows = list(_evt.selection.rows) if _evt and hasattr(_evt, "selection") else []
-            except Exception:
-                _sel_rows = []
-            _last_click_key = f"{tab_prefix}_last_click_idx"
-            if _sel_rows:
-                _sel_idx = _sel_rows[0]
-                # 같은 행 재클릭은 무시 (셀렉트박스 사용자 변경값을 보존)
-                if 0 <= _sel_idx < len(table_rows) and st.session_state.get(_last_click_key) != _sel_idx:
-                    _clicked_name = table_rows[_sel_idx]["상품명"]
-                    if _clicked_name in product_map:
-                        st.session_state[f"{tab_prefix}_select"] = _clicked_name
-                        st.session_state[_last_click_key] = _sel_idx
-            else:
-                st.session_state.pop(_last_click_key, None)
-
+            # ── 셀렉트박스 (리스트 위) ──
             sel_cols = st.columns([4, 1])
             with sel_cols[0]:
                 selected_name = st.selectbox(
@@ -4956,6 +4926,33 @@ elif current_page == "sales_inventory":
                         show_shop_detail_dialog()
                     else:
                         st.toast(f"{sel_name}: 최근 7일 주문 데이터 없음")
+
+            # ── 테이블 (셀렉트박스 아래) ──
+            _evt = st.dataframe(
+                df, width="stretch", hide_index=True,
+                column_config=col_config,
+                height=min(len(table_rows) * 35 + 60, 600),
+                on_select="rerun",
+                selection_mode="single-row",
+                key=f"{tab_prefix}_df",
+            )
+
+            # 행 클릭 → 셀렉트박스 갱신 (셀렉트박스가 위에 이미 그려졌으므로 rerun 필요)
+            try:
+                _sel_rows = list(_evt.selection.rows) if _evt and hasattr(_evt, "selection") else []
+            except Exception:
+                _sel_rows = []
+            _last_click_key = f"{tab_prefix}_last_click_idx"
+            if _sel_rows:
+                _sel_idx = _sel_rows[0]
+                if 0 <= _sel_idx < len(table_rows) and st.session_state.get(_last_click_key) != _sel_idx:
+                    _clicked_name = table_rows[_sel_idx]["상품명"]
+                    if _clicked_name in product_map:
+                        st.session_state[f"{tab_prefix}_select"] = _clicked_name
+                        st.session_state[_last_click_key] = _sel_idx
+                        st.rerun()
+            else:
+                st.session_state.pop(_last_click_key, None)
 
         # ═══ 탭 (판매대응 + 재고 통합) ═══
         inventory_data = fetch_current_inventory()
