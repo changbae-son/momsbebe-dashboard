@@ -2739,44 +2739,23 @@ def show_quick_price_dialog():
     except Exception:
         _our_df = None
 
-    # KPI 한 줄
+    # KPI 한 줄 (들여쓰기 금지 — markdown이 4칸 이상 들여쓰기를 코드블록으로 해석)
     _our_first = _our_df.iloc[0] if (_our_df is not None and len(_our_df) > 0) else None
-    _kpi_html = f"""
-    <div style="display:flex;gap:0.5rem;margin:0.4rem 0;flex-wrap:wrap;">
-        <div style="flex:1;min-width:100px;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:6px;padding:0.4rem 0.6rem;">
-            <div style="font-size:0.65rem;color:#888;">최저가</div>
-            <div style="font-size:0.95rem;font-weight:800;color:#16a34a;">{_min_p:,}원</div>
-        </div>
-        <div style="flex:1;min-width:100px;background:#f1f5f9;border:1px solid #e2e8f0;border-radius:6px;padding:0.4rem 0.6rem;">
-            <div style="font-size:0.65rem;color:#888;">Top7 평균</div>
-            <div style="font-size:0.95rem;font-weight:800;color:#475569;">{_avg_p:,}원</div>
-        </div>
-        <div style="flex:1;min-width:100px;background:#fef2f2;border:1px solid #fecaca;border-radius:6px;padding:0.4rem 0.6rem;">
-            <div style="font-size:0.65rem;color:#888;">최고가</div>
-            <div style="font-size:0.95rem;font-weight:800;color:#dc2626;">{_max_p:,}원</div>
-        </div>
-    """
+    _kpi_parts = ['<div style="display:flex;gap:0.5rem;margin:0.4rem 0;flex-wrap:wrap;">']
+    _kpi_parts.append(f'<div style="flex:1;min-width:100px;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:6px;padding:0.4rem 0.6rem;"><div style="font-size:0.65rem;color:#888;">최저가</div><div style="font-size:0.95rem;font-weight:800;color:#16a34a;">{_min_p:,}원</div></div>')
+    _kpi_parts.append(f'<div style="flex:1;min-width:100px;background:#f1f5f9;border:1px solid #e2e8f0;border-radius:6px;padding:0.4rem 0.6rem;"><div style="font-size:0.65rem;color:#888;">Top7 평균</div><div style="font-size:0.95rem;font-weight:800;color:#475569;">{_avg_p:,}원</div></div>')
+    _kpi_parts.append(f'<div style="flex:1;min-width:100px;background:#fef2f2;border:1px solid #fecaca;border-radius:6px;padding:0.4rem 0.6rem;"><div style="font-size:0.65rem;color:#888;">최고가</div><div style="font-size:0.95rem;font-weight:800;color:#dc2626;">{_max_p:,}원</div></div>')
     if _our_first is not None:
         _our_p = int(_our_first["가격(원)"])
         _our_rank = int(_our_first["순위"])
         _diff = _our_p - _avg_p
         _diff_pct = round((_our_p - _avg_p) / _avg_p * 100) if _avg_p else 0
         _color = "#dc2626" if _diff > 0 else "#16a34a"
-        _kpi_html += f"""
-        <div style="flex:1.2;min-width:130px;background:#fffbeb;border:2px solid #f59e0b;border-radius:6px;padding:0.4rem 0.6rem;">
-            <div style="font-size:0.65rem;color:#888;">🏪 우리 ({_our_first['판매처']} · {_our_rank}위)</div>
-            <div style="font-size:0.95rem;font-weight:800;color:{_color};">{_our_p:,}원 ({_diff_pct:+d}%)</div>
-        </div>
-        """
+        _kpi_parts.append(f'<div style="flex:1.2;min-width:130px;background:#fffbeb;border:2px solid #f59e0b;border-radius:6px;padding:0.4rem 0.6rem;"><div style="font-size:0.65rem;color:#888;">🏪 우리 ({_our_first["판매처"]} · {_our_rank}위)</div><div style="font-size:0.95rem;font-weight:800;color:{_color};">{_our_p:,}원 ({_diff_pct:+d}%)</div></div>')
     else:
-        _kpi_html += f"""
-        <div style="flex:1.2;min-width:130px;background:#fef9c3;border:2px solid #eab308;border-radius:6px;padding:0.4rem 0.6rem;">
-            <div style="font-size:0.65rem;color:#888;">🏪 우리매장</div>
-            <div style="font-size:0.85rem;font-weight:700;color:#a16207;">Top7 미노출</div>
-        </div>
-        """
-    _kpi_html += "</div>"
-    st.markdown(_kpi_html, unsafe_allow_html=True)
+        _kpi_parts.append('<div style="flex:1.2;min-width:130px;background:#fef9c3;border:2px solid #eab308;border-radius:6px;padding:0.4rem 0.6rem;"><div style="font-size:0.65rem;color:#888;">🏪 우리매장</div><div style="font-size:0.85rem;font-weight:700;color:#a16207;">Top7 미노출</div></div>')
+    _kpi_parts.append('</div>')
+    st.markdown("".join(_kpi_parts), unsafe_allow_html=True)
 
     # Top5 미니 표
     _table_rows = []
