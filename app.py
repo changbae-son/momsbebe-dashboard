@@ -4894,11 +4894,14 @@ elif current_page == "sales_inventory":
             if show_today_col:
                 col_config["오늘출고"] = st.column_config.TextColumn("오늘출고", width="small")
 
-            # 테이블 표시
-            st.dataframe(
+            # 테이블 표시 + 행 클릭 이벤트
+            _evt = st.dataframe(
                 df, width="stretch", hide_index=True,
                 column_config=col_config,
                 height=min(len(table_rows) * 35 + 60, 600),
+                on_select="rerun",
+                selection_mode="single-row",
+                key=f"{tab_prefix}_df",
             )
 
             # 상품 검색/선택 → 판매처 상세
@@ -4912,6 +4915,19 @@ elif current_page == "sales_inventory":
                 if _auto_name in product_map:
                     _default_name = _auto_name
                     st.session_state[f"{tab_prefix}_select"] = _default_name
+
+            # 테이블 행 클릭 → 셀렉트박스 자동 선택 (셀렉트박스가 그려지기 전에 세션 키 세팅)
+            try:
+                _sel_rows = _evt.selection.rows if _evt and hasattr(_evt, "selection") else []
+            except Exception:
+                _sel_rows = []
+            if _sel_rows:
+                _sel_idx = _sel_rows[0]
+                if 0 <= _sel_idx < len(table_rows):
+                    _clicked_name = table_rows[_sel_idx]["상품명"]
+                    if _clicked_name in product_map and st.session_state.get(f"{tab_prefix}_select") != _clicked_name:
+                        st.session_state[f"{tab_prefix}_select"] = _clicked_name
+                        st.rerun()
 
             sel_cols = st.columns([4, 1])
             with sel_cols[0]:
