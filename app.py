@@ -4287,6 +4287,16 @@ def show_detail_analysis(data: dict, all_df):
             else:
                 st.info("상품명 양호 — 개선안 없음")
 
+    # ── MD 메모 (케이스/텔레그램 공용) ──
+    _memo_key = f"_detail_memo_{our_name[:30]}_{our_rank}"
+    _md_memo = st.text_area(
+        "📝 MD 메모 (대표 보고용)",
+        key=_memo_key,
+        placeholder="예) 11/24 가격 9,500원으로 인하 적용 완료 / 상품명 '쉐이빙젤' 삭제 후 등록 예정",
+        height=68,
+        help="여기에 작성한 메모는 '케이스 등록'과 '텔레그램 전송' 양쪽에 자동으로 포함됩니다.",
+    )
+
     _ax3, _ax4, _ax5 = st.columns([1, 1, 1])
 
     # ── 액션 3: 케이스 자동 등록 ──
@@ -4318,7 +4328,10 @@ def show_detail_analysis(data: dict, all_df):
                             "label": _action_label,
                             "cause": f"{our_mall} {our_rank}위 상세분석",
                             "detail": _detail_text,
-                            "memo": f"우리 {our_price:,}원 / 최저 {_act_cheapest['개당가격']*our_qty if (_act_cheapest and our_qty) else 0:,}원",
+                            "memo": (
+                                (_md_memo.strip() + " | " if _md_memo and _md_memo.strip() else "")
+                                + f"우리 {our_price:,}원 / 최저 {_act_cheapest['개당가격']*our_qty if (_act_cheapest and our_qty) else 0:,}원"
+                            ),
                             "platforms": [our_mall],
                             "margin_impact": "확인필요",
                             "worker": "MD",
@@ -4372,6 +4385,10 @@ def show_detail_analysis(data: dict, all_df):
                         _tg_lines.append(f"📝 상품명: {issues[0][:60]}")
                     if our_link and our_link != "#":
                         _tg_lines.append(f"🔗 {our_link}")
+                    # MD 메모를 대표 보고용으로 우선 노출
+                    if _md_memo and _md_memo.strip():
+                        _tg_lines.insert(1, f"📝 *MD 메모*: {_md_memo.strip()}")
+                    _tg_lines.append(f"🕒 {datetime.now(KST).strftime('%m/%d %H:%M')} · 작성자 MD")
                     send_telegram("\n".join(_tg_lines))
                     st.session_state[_tg_key_active] = True
                     st.rerun()
@@ -4387,7 +4404,9 @@ def show_detail_analysis(data: dict, all_df):
                 st.session_state.pop(f"show_detail_{_i}", None)
             # 액션 완료 플래그도 정리
             for _k in list(st.session_state.keys()):
-                if _k.startswith("_detail_case_done_") or _k.startswith("_detail_tg_done_"):
+                if (_k.startswith("_detail_case_done_")
+                        or _k.startswith("_detail_tg_done_")
+                        or _k.startswith("_detail_memo_")):
                     st.session_state.pop(_k, None)
             st.rerun()
 
