@@ -2698,6 +2698,130 @@ def show_product_pages_dialog():
 
 
 # ─────────────────────────────────────────────
+# 💰 인라인 가격 확인 다이얼로그 (W-1)
+# 페이지 이동 없이 업무일지에서 즉시 경쟁가 확인 → 작업 흐름 유지
+# ─────────────────────────────────────────────
+@st.dialog("💰 빠른 가격 확인", width="large")
+def show_quick_price_dialog():
+    data = st.session_state.get("_quick_price_data", {})
+    if not data:
+        st.warning("데이터를 불러올 수 없습니다.")
+        return
+    pname  = data.get("pname", "")
+    pid    = data.get("pid", "")
+    avg_q  = data.get("avg_qty", 0)
+
+    st.markdown(f"**{pname}** <code>[{pid}]</code> · 일평균 {avg_q}개", unsafe_allow_html=True)
+
+    with st.spinner(f"📡 {pname[:30]} 가격 조회 중..."):
+        try:
+            _df, _our_df = search_products(pname)
+        except Exception as _e:
+            st.error(f"검색 실패: {_e}")
+            _df, _our_df = None, None
+
+    if _df is None or len(_df) == 0:
+        st.info("검색 결과가 없습니다.")
+        return
+
+    _top = _df.head(7).copy()
+    _min_p = int(_top["가격(원)"].min())
+    _avg_p = int(_top["가격(원)"].mean())
+    _max_p = int(_top["가격(원)"].max())
+
+    # KPI 한 줄
+    _our_first = _our_df.iloc[0] if (_our_df is not None and len(_our_df) > 0) else None
+    _kpi_html = f"""
+    <div style="display:flex;gap:0.5rem;margin:0.4rem 0;flex-wrap:wrap;">
+        <div style="flex:1;min-width:100px;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:6px;padding:0.4rem 0.6rem;">
+            <div style="font-size:0.65rem;color:#888;">최저가</div>
+            <div style="font-size:0.95rem;font-weight:800;color:#16a34a;">{_min_p:,}원</div>
+        </div>
+        <div style="flex:1;min-width:100px;background:#f1f5f9;border:1px solid #e2e8f0;border-radius:6px;padding:0.4rem 0.6rem;">
+            <div style="font-size:0.65rem;color:#888;">Top7 평균</div>
+            <div style="font-size:0.95rem;font-weight:800;color:#475569;">{_avg_p:,}원</div>
+        </div>
+        <div style="flex:1;min-width:100px;background:#fef2f2;border:1px solid #fecaca;border-radius:6px;padding:0.4rem 0.6rem;">
+            <div style="font-size:0.65rem;color:#888;">최고가</div>
+            <div style="font-size:0.95rem;font-weight:800;color:#dc2626;">{_max_p:,}원</div>
+        </div>
+    """
+    if _our_first is not None:
+        _our_p = int(_our_first["가격(원)"])
+        _our_rank = int(_our_first["순위"])
+        _diff = _our_p - _avg_p
+        _diff_pct = round((_our_p - _avg_p) / _avg_p * 100) if _avg_p else 0
+        _color = "#dc2626" if _diff > 0 else "#16a34a"
+        _kpi_html += f"""
+        <div style="flex:1.2;min-width:130px;background:#fffbeb;border:2px solid #f59e0b;border-radius:6px;padding:0.4rem 0.6rem;">
+            <div style="font-size:0.65rem;color:#888;">🏪 우리 ({_our_first['판매처']} · {_our_rank}위)</div>
+            <div style="font-size:0.95rem;font-weight:800;color:{_color};">{_our_p:,}원 ({_diff_pct:+d}%)</div>
+        </div>
+        """
+    else:
+        _kpi_html += f"""
+        <div style="flex:1.2;min-width:130px;background:#fef9c3;border:2px solid #eab308;border-radius:6px;padding:0.4rem 0.6rem;">
+            <div style="font-size:0.65rem;color:#888;">🏪 우리매장</div>
+            <div style="font-size:0.85rem;font-weight:700;color:#a16207;">Top7 미노출</div>
+        </div>
+        """
+    _kpi_html += "</div>"
+    st.markdown(_kpi_html, unsafe_allow_html=True)
+
+    # Top5 미니 표
+    _table_rows = []
+    for _, r in _top.head(7).iterrows():
+        _is_ours = is_our_store(r["판매처"])
+        _icon = "🟠" if _is_ours else ""
+        _table_rows.append({
+            "순위": int(r["순위"]),
+            "판매처": f"{_icon} {r['판매처']}",
+            "상품명": (r["상품명"] or "")[:28],
+            "가격": int(r["가격(원)"]),
+            "링크": r.get("링크", ""),
+        })
+    st.dataframe(
+        pd.DataFrame(_table_rows),
+        width="stretch", hide_index=True, height=290,
+        column_config={
+            "순위": st.column_config.NumberColumn("순위", width="small"),
+            "판매처": st.column_config.TextColumn("판매처", width="small"),
+            "상품명": st.column_config.TextColumn("상품명", width="medium"),
+            "가격": st.column_config.NumberColumn("가격", format="%d원"),
+            "링크": st.column_config.LinkColumn("페이지", display_text="열기↗"),
+        },
+    )
+
+    # 빠른 권장 액션
+    if _our_first is not None:
+        _our_p = int(_our_first["가격(원)"])
+        if _our_p > _min_p * 1.1:
+            _rec = round(_min_p * 1.1)
+            st.warning(f"💡 권장: 가격 인하 검토 — 현재 {_our_p:,}원 → **{_rec:,}원** (최저+10%)")
+        elif _our_p > _avg_p:
+            st.info(f"📊 평균보다 약간 높음 — 우리 {_our_p:,}원 vs 평균 {_avg_p:,}원")
+        else:
+            st.success(f"✅ 가격 경쟁력 양호 — 우리 {_our_p:,}원 ≤ 평균 {_avg_p:,}원")
+    else:
+        st.warning("⚠️ Top7 미노출 — 가격/광고/상품명 점검 필요")
+
+    # 액션 버튼: 심층 분석 / 닫기
+    st.divider()
+    _bc1, _bc2 = st.columns([1, 1])
+    with _bc1:
+        if st.button("🔬 가격 모니터링에서 심층분석", key="quick_price_deep", width="stretch"):
+            st.session_state["current_page"] = "price_monitor"
+            st.session_state["_auto_price_keyword"] = pname
+            st.session_state["_return_to_page"] = "daily_log"   # 돌아가기 경로 저장
+            st.session_state.pop("_quick_price_data", None)
+            st.rerun()
+    with _bc2:
+        if st.button("✖ 닫기 (업무 계속)", key="quick_price_close", width="stretch", type="primary"):
+            st.session_state.pop("_quick_price_data", None)
+            st.rerun()
+
+
+# ─────────────────────────────────────────────
 # 📝 상세페이지 CTA 자동 분석 (논문 기반 PDP 프레임워크)
 # 참조: PDP_Design_632-643, 이커머스 구매 전환율 최적화 방안 연구,
 #        상세페이지 리디자인 마스터 프롬프트 (카테고리 무관)
@@ -4457,6 +4581,12 @@ maybe_send_weekly_report()
 _shop_cache = st.session_state.setdefault("_shop_detail_cache", {})
 _pages_cache = st.session_state.setdefault("_product_pages_cache", {})
 
+# W-1: 빠른 가격 확인 (인라인) — 페이지 이동 없이 즉시 다이얼로그
+_pending_qp = st.session_state.pop("_pending_quick_price", None)
+if _pending_qp:
+    st.session_state["_quick_price_data"] = _pending_qp
+    show_quick_price_dialog()
+
 _pending = st.session_state.pop("_pending_shop_detail", None)
 if _pending:
     _lookup_days = _pending.get("days", 7)
@@ -5264,6 +5394,15 @@ elif current_page == "sales_inventory":
 # ─────────────────────────────────────────────
 elif current_page == "price_monitor":
     st.markdown('<div class="section-title"><span class="icon">🛒</span> 실시간 가격 모니터링 (네이버 쇼핑)</div>', unsafe_allow_html=True)
+
+    # W-1: 업무일지에서 넘어온 경우 돌아가기 버튼 노출
+    _return_to = st.session_state.get("_return_to_page")
+    if _return_to:
+        _back_label = {"daily_log": "📝 업무일지로 돌아가기", "dashboard": "🏠 대시보드로 돌아가기"}.get(_return_to, "← 돌아가기")
+        if st.button(_back_label, key="price_back_to_origin"):
+            st.session_state["current_page"] = _return_to
+            st.session_state.pop("_return_to_page", None)
+            st.rerun()
 
     # 업무일지에서 넘어온 자동 검색 키워드
     _auto_kw = st.session_state.pop("_auto_price_keyword", "")
@@ -6189,10 +6328,16 @@ elif current_page == "daily_log":
             if sel == "detail":
                 st.session_state["_pending_shop_detail"] = {"pid": p_id, "pname": p_name, "avg_qty": avg_q}
             elif sel == "price":
-                st.session_state["current_page"] = "price_monitor"
-                st.session_state["_auto_price_keyword"] = p_name
+                # W-1: 페이지 이동 대신 인라인 빠른 가격 확인 다이얼로그
+                st.session_state["_pending_quick_price"] = {
+                    "pid": p_id, "pname": p_name, "avg_qty": avg_q,
+                }
             elif sel == "page":
-                st.session_state["_pending_product_pages"] = {"pid": p_id, "pname": p_name, "avg_qty": avg_q}
+                # 업무일지 → 상세페이지 = CTA 분석 다이얼로그 (URL 목록은 '판매처 상세'와 중복이므로)
+                st.session_state["_pending_product_pages"] = {
+                    "pid": p_id, "pname": p_name, "avg_qty": avg_q,
+                    "source": "slow_moving",  # CTA 분석 라우팅 트리거
+                }
             elif sel == "done":
                 st.session_state["_pending_action_dialog"] = {"task_id": tid, "product_name": p_name}
 
