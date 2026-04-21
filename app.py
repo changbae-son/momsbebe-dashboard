@@ -38,7 +38,13 @@ st.markdown("""
     /* ── 전역 스타일 ── */
     @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@300;400;500;700;900&display=swap');
 
-    .block-container { padding-top: 1rem; max-width: 1200px; }
+    .block-container { padding-top: 0.4rem; padding-bottom: 0.5rem; max-width: 1200px; }
+    /* Streamlit 기본 위젯 간 마진 축소 */
+    [data-testid="stVerticalBlock"] > div { gap: 0.4rem; }
+    .stMarkdown { margin-bottom: 0 !important; }
+    h1, h2, h3 { margin-top: 0.4rem !important; margin-bottom: 0.4rem !important; }
+    [data-testid="stTabs"] { margin-top: 0 !important; }
+    hr { margin: 0.5rem 0 !important; }
 
     /* ── 헤더 배너 (슬림) ── */
     .header-banner {
@@ -171,18 +177,18 @@ st.markdown("""
     .kpi-card .sub { font-size: 0.58rem; opacity: 0.5; margin-top: 0.05rem; }
     .kpi-card.pending .value { opacity: 0.35; font-size: 0.85rem; }
 
-    /* ── 섹션 헤더 ── */
+    /* ── 섹션 헤더 (슬림) ── */
     .section-title {
         display: flex;
         align-items: center;
-        gap: 0.5rem;
-        font-size: 1.15rem;
+        gap: 0.4rem;
+        font-size: 1rem;
         font-weight: 700;
-        margin: 2rem 0 0.8rem 0;
-        padding-bottom: 0.5rem;
-        border-bottom: 2px solid rgba(102, 126, 234, 0.3);
+        margin: 0.8rem 0 0.3rem 0;
+        padding-bottom: 0.25rem;
+        border-bottom: 1px solid rgba(102, 126, 234, 0.3);
     }
-    .section-title .icon { font-size: 1.3rem; }
+    .section-title .icon { font-size: 1.05rem; }
 
     /* ── 업무 일지 카드 ── */
     .log-entry {
@@ -5402,10 +5408,10 @@ elif current_page == "daily_log":
     .log-kpi.rate { background: linear-gradient(135deg, #f3f0ff, #ede7f6); border: 1px solid #d1c4e9; }
     .log-kpi.rate .kpi-value { color: #5e35b1; }
 
-    /* ── 프로그레스 바 ── */
+    /* ── 프로그레스 바 (슬림) ── */
     .progress-container {
-        background: #e8e8e8; border-radius: 10px; height: 8px;
-        overflow: hidden; margin: 0 0 1.2rem 0; position: relative;
+        background: #e8e8e8; border-radius: 6px; height: 5px;
+        overflow: hidden; margin: 0 0 0.4rem 0; position: relative;
     }
     .progress-fill {
         height: 100%; border-radius: 10px;
