@@ -4236,6 +4236,14 @@ def show_detail_analysis(data: dict, all_df):
                             </div>
                             """, unsafe_allow_html=True)
 
+    # ── 닫기 버튼 (다이얼로그 종료) ──
+    st.markdown("---")
+    _close_c1, _close_c2, _close_c3 = st.columns([1, 1, 1])
+    with _close_c2:
+        if st.button("✖ 닫기", key="detail_modal_close", width="stretch", type="primary"):
+            for _i in range(10):
+                st.session_state.pop(f"show_detail_{_i}", None)
+            st.rerun()
 
 
 # ─────────────────────────────────────────────
@@ -5471,14 +5479,18 @@ elif current_page == "price_monitor":
         """, unsafe_allow_html=True)
 
     # 팝업 트리거 처리
+    # 버그 수정: 다이얼로그 렌더 직후 플래그를 False로 만들면 내부 탭/expander 클릭으로
+    # rerun이 발생할 때마다 다이얼로그가 사라지므로, 플래그는 유지하고 별도 닫기 버튼/X로만 해제.
+    _active_idx = None
     for _idx in range(10):
         if st.session_state.get(f"show_detail_{_idx}"):
-            detail_data = st.session_state.get(f"detail_data_{_idx}", {})
-            if detail_data and active_keyword:
-                _df, _ = search_products(active_keyword)
-                show_detail_analysis(detail_data, _df)
-            st.session_state[f"show_detail_{_idx}"] = False
+            _active_idx = _idx
             break
+    if _active_idx is not None:
+        detail_data = st.session_state.get(f"detail_data_{_active_idx}", {})
+        if detail_data and active_keyword:
+            _df, _ = search_products(active_keyword)
+            show_detail_analysis(detail_data, _df)
 
 
 # ─────────────────────────────────────────────
