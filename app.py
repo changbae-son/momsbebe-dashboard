@@ -3759,17 +3759,17 @@ def show_detail_analysis(data: dict, all_df):
     for label, info in scores.items():
         score_badges += f'<div style="text-align:center; min-width:52px;"><div style="width:10px; height:10px; border-radius:50%; background:{info["c"]}; margin:0 auto 2px;"></div><div style="font-size:0.58rem; color:#94a3b8;">{label}</div><div style="font-size:0.68rem; font-weight:700;">{info["s"]}</div><div style="font-size:0.55rem; color:#94a3b8;">{info["d"]}</div></div>'
 
-    img_html = f'<img src="{our_image}" style="width:50px; height:50px; border-radius:6px; object-fit:cover;">' if our_image else ''
-    link_html = f' · <a href="{our_link}" target="_blank" style="font-size:0.7rem; color:#3b82f6;">상품페이지↗</a>' if our_link and our_link != "#" else ''
+    img_html = f'<img src="{our_image}" style="width:38px; height:38px; border-radius:5px; object-fit:cover;">' if our_image else ''
+    link_html = f' · <a href="{our_link}" target="_blank" style="font-size:0.66rem; color:#3b82f6;">상품페이지↗</a>' if our_link and our_link != "#" else ''
 
     st.markdown(f"""
-    <div style="display:flex; align-items:center; gap:0.8rem; padding:0.5rem 0;">
+    <div style="display:flex; align-items:center; gap:0.6rem; padding:0.2rem 0;">
         {img_html}
         <div style="flex:1; min-width:0;">
-            <div style="font-size:0.8rem; font-weight:700;">🏪 {our_mall} · {our_rank}위 · {our_price:,}원{link_html}</div>
-            <div style="font-size:0.68rem; color:#64748b; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">{our_name}</div>
+            <div style="font-size:0.74rem; font-weight:700;">🏪 {our_mall} · {our_rank}위 · {our_price:,}원{link_html}</div>
+            <div style="font-size:0.64rem; color:#64748b; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">{our_name}</div>
         </div>
-        <div style="display:flex; gap:0.4rem; flex-shrink:0;">
+        <div style="display:flex; gap:0.3rem; flex-shrink:0;">
             {score_badges}
         </div>
     </div>
@@ -3800,40 +3800,24 @@ def show_detail_analysis(data: dict, all_df):
             _diff_pct = round((our_unit / cheapest["개당가격"] - 1) * 100)
 
             st.markdown(f"""
-            <div style="background: linear-gradient(135deg, #fef2f2, #fff5f5); border: 1px solid #fecaca; border-radius: 12px; padding: 0.8rem 1rem; margin: 0.5rem 0;">
-                <div style="display:flex; align-items:center; gap:0.5rem; margin-bottom:0.5rem;">
-                    <span style="font-size:1.1rem;">💸</span>
-                    <span style="font-size:0.9rem; font-weight:800; color:#dc2626;">예상 매출 손실</span>
-                    <span style="font-size:0.68rem; color:#999; margin-left:auto;">일평균 {_daily_qty}개 기준</span>
+            <div style="background: linear-gradient(135deg, #fef2f2, #fff5f5); border: 1px solid #fecaca; border-radius: 8px; padding: 0.45rem 0.7rem; margin: 0.3rem 0; display:flex; align-items:center; gap:0.7rem; flex-wrap:wrap;">
+                <div style="display:flex; align-items:center; gap:0.3rem;">
+                    <span style="font-size:0.95rem;">💸</span>
+                    <span style="font-size:0.78rem; font-weight:800; color:#dc2626;">예상 손실</span>
                 </div>
-                <div style="display:flex; gap:1rem; flex-wrap:wrap;">
-                    <div style="flex:1; min-width:120px;">
-                        <div style="font-size:0.68rem; color:#888;">우리 개당가격</div>
-                        <div style="font-size:1rem; font-weight:700; color:#dc2626;">{our_unit:,}원</div>
-                    </div>
-                    <div style="flex:1; min-width:120px;">
-                        <div style="font-size:0.68rem; color:#888;">최저가 (개당)</div>
-                        <div style="font-size:1rem; font-weight:700; color:#16a34a;">{cheapest['개당가격']:,}원</div>
-                    </div>
-                    <div style="flex:1; min-width:120px;">
-                        <div style="font-size:0.68rem; color:#888;">차이</div>
-                        <div style="font-size:1rem; font-weight:700; color:#dc2626;">+{unit_diff:,}원 (+{_diff_pct}%)</div>
-                    </div>
+                <div style="display:flex; gap:0.7rem; flex:1; flex-wrap:wrap; font-size:0.72rem;">
+                    <span><span style="color:#888;">우리</span> <b style="color:#dc2626;">{our_unit:,}원</b></span>
+                    <span style="color:#cbd5e1;">|</span>
+                    <span><span style="color:#888;">최저</span> <b style="color:#16a34a;">{cheapest['개당가격']:,}원</b></span>
+                    <span style="color:#cbd5e1;">|</span>
+                    <span><span style="color:#888;">차이</span> <b style="color:#dc2626;">+{unit_diff:,}원 (+{_diff_pct}%)</b></span>
+                    <span style="color:#cbd5e1;">|</span>
+                    <span><span style="color:#888;">일</span> <b style="color:#dc2626;">-{_daily_loss:,}</b></span>
+                    <span><span style="color:#888;">월</span> <b style="color:#dc2626;">-{_monthly_loss:,}</b></span>
                 </div>
-                <div style="margin-top:0.6rem; padding-top:0.5rem; border-top:1px solid #fecaca; display:flex; gap:1rem; flex-wrap:wrap;">
-                    <div style="flex:1; text-align:center; padding:0.4rem; background:#fff; border-radius:8px;">
-                        <div style="font-size:0.68rem; color:#888;">일 손실</div>
-                        <div style="font-size:1.1rem; font-weight:800; color:#dc2626;">-{_daily_loss:,}원</div>
-                    </div>
-                    <div style="flex:1; text-align:center; padding:0.4rem; background:#fff; border-radius:8px;">
-                        <div style="font-size:0.68rem; color:#888;">월 손실 추정</div>
-                        <div style="font-size:1.1rem; font-weight:800; color:#dc2626;">-{_monthly_loss:,}원</div>
-                    </div>
-                    <div style="flex:1; text-align:center; padding:0.4rem; background:#f0fdf4; border-radius:8px; border:1px solid #bbf7d0;">
-                        <div style="font-size:0.68rem; color:#888;">🎯 권장 가격</div>
-                        <div style="font-size:1.1rem; font-weight:800; color:#16a34a;">{_recommend_total:,}원</div>
-                        <div style="font-size:0.6rem; color:#888;">최저가+10%</div>
-                    </div>
+                <div style="background:#f0fdf4; border:1px solid #bbf7d0; border-radius:6px; padding:0.15rem 0.5rem; font-size:0.72rem;">
+                    🎯 권장 <b style="color:#16a34a;">{_recommend_total:,}원</b>
+                    <span style="color:#94a3b8; font-size:0.62rem;">(최저+10%·일 {_daily_qty}개)</span>
                 </div>
             </div>
             """, unsafe_allow_html=True)
