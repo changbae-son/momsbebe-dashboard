@@ -4916,18 +4916,24 @@ elif current_page == "sales_inventory":
                     _default_name = _auto_name
                     st.session_state[f"{tab_prefix}_select"] = _default_name
 
-            # 테이블 행 클릭 → 셀렉트박스 자동 선택 (셀렉트박스가 그려지기 전에 세션 키 세팅)
+            # 테이블 행 클릭 → 셀렉트박스 자동 선택
+            # st.dataframe(on_select='rerun')가 이미 rerun을 일으키므로 추가 rerun 불필요.
+            # 셀렉트박스가 아직 그려지기 전이므로 session_state[key]에 미리 써두면 초기값으로 잡힘.
             try:
-                _sel_rows = _evt.selection.rows if _evt and hasattr(_evt, "selection") else []
+                _sel_rows = list(_evt.selection.rows) if _evt and hasattr(_evt, "selection") else []
             except Exception:
                 _sel_rows = []
+            _last_click_key = f"{tab_prefix}_last_click_idx"
             if _sel_rows:
                 _sel_idx = _sel_rows[0]
-                if 0 <= _sel_idx < len(table_rows):
+                # 같은 행 재클릭은 무시 (셀렉트박스 사용자 변경값을 보존)
+                if 0 <= _sel_idx < len(table_rows) and st.session_state.get(_last_click_key) != _sel_idx:
                     _clicked_name = table_rows[_sel_idx]["상품명"]
-                    if _clicked_name in product_map and st.session_state.get(f"{tab_prefix}_select") != _clicked_name:
+                    if _clicked_name in product_map:
                         st.session_state[f"{tab_prefix}_select"] = _clicked_name
-                        st.rerun()
+                        st.session_state[_last_click_key] = _sel_idx
+            else:
+                st.session_state.pop(_last_click_key, None)
 
             sel_cols = st.columns([4, 1])
             with sel_cols[0]:
