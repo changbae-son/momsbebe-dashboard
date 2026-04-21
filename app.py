@@ -4365,35 +4365,38 @@ def show_detail_analysis(data: dict, all_df):
         except Exception:
             st.button("📥 경쟁사 CSV", disabled=True, width="stretch", key="detail_act_csv_e")
 
-    # ── 액션 5: 텔레그램 전송 ──
+    # ── 액션 5: 텔레그램 전송 (재전송 허용) ──
     with _ax5:
         _tg_key_active = f"_detail_tg_done_{our_name[:30]}_{our_rank}"
-        if st.session_state.get(_tg_key_active):
-            st.success("✅ 전송됨")
-        else:
-            if st.button("📨 텔레그램 전송", key="detail_act_tg", width="stretch"):
-                try:
-                    _tg_lines = [
-                        f"🔬 *상세분석 액션* — {our_mall} ({our_rank}위)",
-                        f"상품: {our_name[:50]}",
-                        f"현재: {our_price:,}원 (개당 {our_unit:,}원)" if our_unit else f"현재: {our_price:,}원",
-                    ]
-                    if _act_cheapest and our_unit and our_unit > _act_cheapest["개당가격"]:
-                        _tg_lines.append(f"💰 권장가: {_act_rec_total:,}원 (개당 {_act_rec_unit:,}원)")
-                        _tg_lines.append(f"📉 최저가 {_act_cheapest['개당가격']:,}원 대비 +{round((our_unit/_act_cheapest['개당가격']-1)*100)}%")
-                    if issues:
-                        _tg_lines.append(f"📝 상품명: {issues[0][:60]}")
-                    if our_link and our_link != "#":
-                        _tg_lines.append(f"🔗 {our_link}")
-                    # MD 메모를 대표 보고용으로 우선 노출
-                    if _md_memo and _md_memo.strip():
-                        _tg_lines.insert(1, f"📝 *MD 메모*: {_md_memo.strip()}")
-                    _tg_lines.append(f"🕒 {datetime.now(KST).strftime('%m/%d %H:%M')} · 작성자 MD")
-                    send_telegram("\n".join(_tg_lines))
-                    st.session_state[_tg_key_active] = True
-                    st.rerun()
-                except Exception as _e:
-                    st.error(f"전송 실패: {_e}")
+        _tg_last_sent  = st.session_state.get(_tg_key_active)  # HH:MM 문자열
+        _tg_label      = f"📨 재전송 (마지막 {_tg_last_sent})" if _tg_last_sent else "📨 텔레그램 전송"
+        if st.button(_tg_label, key="detail_act_tg", width="stretch"):
+            try:
+                _tg_lines = [
+                    f"🔬 *상세분석 액션* — {our_mall} ({our_rank}위)",
+                    f"상품: {our_name[:50]}",
+                    f"현재: {our_price:,}원 (개당 {our_unit:,}원)" if our_unit else f"현재: {our_price:,}원",
+                ]
+                if _act_cheapest and our_unit and our_unit > _act_cheapest["개당가격"]:
+                    _tg_lines.append(f"💰 권장가: {_act_rec_total:,}원 (개당 {_act_rec_unit:,}원)")
+                    _tg_lines.append(f"📉 최저가 {_act_cheapest['개당가격']:,}원 대비 +{round((our_unit/_act_cheapest['개당가격']-1)*100)}%")
+                if issues:
+                    _tg_lines.append(f"📝 상품명: {issues[0][:60]}")
+                if our_link and our_link != "#":
+                    _tg_lines.append(f"🔗 {our_link}")
+                # MD 메모를 대표 보고용으로 우선 노출
+                if _md_memo and _md_memo.strip():
+                    _tg_lines.insert(1, f"📝 *MD 메모*: {_md_memo.strip()}")
+                _now_str = datetime.now(KST).strftime('%m/%d %H:%M')
+                _tg_lines.append(f"🕒 {_now_str} · 작성자 MD")
+                send_telegram("\n".join(_tg_lines))
+                st.session_state[_tg_key_active] = datetime.now(KST).strftime('%H:%M')
+                st.toast("📨 텔레그램 전송 완료", icon="✅")
+                st.rerun()
+            except Exception as _e:
+                st.error(f"전송 실패: {_e}")
+        if _tg_last_sent:
+            st.caption(f"✅ 마지막 전송 {_tg_last_sent} — 메모 수정 후 재전송 가능")
 
     # ── 닫기 버튼 (다이얼로그 종료) ──
     st.markdown("---")
