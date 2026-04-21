@@ -3124,9 +3124,25 @@ def _enrich_with_examples(scores: dict, parsed: dict, pname: str, brand: str) ->
     _desc    = (parsed.get("og_description") or "").strip()
     _pi      = parsed.get("price_info", {})
     _ri      = parsed.get("review_info", {})
-    _sale    = _pi.get("sale_price")
-    _orig    = _pi.get("original_price")
-    _disc    = _pi.get("discount_rate")
+    # JSON-LD의 offers.price는 문자열("10500")로 오는 경우가 많아 안전하게 숫자 변환
+    def _to_num(v):
+        if v is None or v == "":
+            return None
+        try:
+            if isinstance(v, (int, float)):
+                return v
+            return float(str(v).replace(",", "").replace("원", "").strip())
+        except Exception:
+            return None
+    _sale    = _to_num(_pi.get("sale_price"))
+    _orig    = _to_num(_pi.get("original_price"))
+    _disc    = _to_num(_pi.get("discount_rate"))
+    if _sale is not None:
+        _sale = int(_sale)
+    if _orig is not None:
+        _orig = int(_orig)
+    if _disc is not None:
+        _disc = int(_disc)
     _rc      = _ri.get("count", 0)
     _rr      = _ri.get("rating") or 0
     _ic      = parsed.get("image_count", 0)
