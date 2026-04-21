@@ -3893,19 +3893,43 @@ def show_detail_analysis(data: dict, all_df):
     if not top_actions:
         st.success("✅ 현재 긴급하게 수정할 사항이 없습니다. 아래 탭에서 세부 분석을 확인하세요.")
     else:
-        # 2열 그리드
-        _act_cols = st.columns(2)
-        for i, act in enumerate(top_actions[:6]):
-            with _act_cols[i % 2]:
-                st.markdown(f"""
-                <div style="padding:0.45rem 0.7rem; margin-bottom:0.35rem; border-radius:6px; background:{act['bg']}; border-left:3px solid {act['border']};">
-                    <div style="display:flex; align-items:center; gap:0.3rem;">
-                        <span style="font-size:0.55rem; font-weight:700; color:#fff; background:{act['border']}; padding:0.08rem 0.3rem; border-radius:3px;">{act['priority']}</span>
-                        <span style="font-weight:700; font-size:0.78rem;">{act['title']}</span>
-                    </div>
-                    <div style="margin-top:0.15rem; font-size:0.72rem; color:#475569;">{act['action']}</div>
-                </div>
-                """, unsafe_allow_html=True)
+        # 우선순위 정렬: 긴급 → 중요 → 권장
+        _prio_order = {"긴급": 0, "중요": 1, "권장": 2}
+        _sorted_actions = sorted(top_actions[:6], key=lambda a: _prio_order.get(a["priority"], 9))
+
+        # 우선순위별 카운트
+        _prio_count = {"긴급": 0, "중요": 0, "권장": 0}
+        for _a in _sorted_actions:
+            _prio_count[_a["priority"]] = _prio_count.get(_a["priority"], 0) + 1
+        _summary_chips = []
+        if _prio_count["긴급"]:
+            _summary_chips.append(f'<span style="background:#ef4444;color:#fff;padding:0.1rem 0.45rem;border-radius:10px;font-size:0.65rem;font-weight:700;">🚨 긴급 {_prio_count["긴급"]}</span>')
+        if _prio_count["중요"]:
+            _summary_chips.append(f'<span style="background:#f59e0b;color:#fff;padding:0.1rem 0.45rem;border-radius:10px;font-size:0.65rem;font-weight:700;">⚠️ 중요 {_prio_count["중요"]}</span>')
+        if _prio_count["권장"]:
+            _summary_chips.append(f'<span style="background:#22c55e;color:#fff;padding:0.1rem 0.45rem;border-radius:10px;font-size:0.65rem;font-weight:700;">💡 권장 {_prio_count["권장"]}</span>')
+        st.markdown(f'<div style="margin:-0.2rem 0 0.4rem;display:flex;gap:0.3rem;">{"".join(_summary_chips)}</div>', unsafe_allow_html=True)
+
+        # 단일 컬럼 task-row 리스트
+        _rows_html = ""
+        for _i, act in enumerate(_sorted_actions, start=1):
+            _prio_bg = act["border"]
+            _row_bg  = "#fff"
+            _hover_bg = act["bg"]
+            _rows_html += (
+                f'<div style="display:flex;align-items:center;gap:0.55rem;padding:0.5rem 0.7rem;'
+                f'margin-bottom:0.3rem;border-radius:7px;background:{_row_bg};'
+                f'border-left:4px solid {_prio_bg};box-shadow:0 1px 2px rgba(0,0,0,0.03);">'
+                f'<span style="font-size:0.7rem;font-weight:800;color:#94a3b8;min-width:18px;">#{_i}</span>'
+                f'<span style="font-size:0.6rem;font-weight:800;color:#fff;background:{_prio_bg};'
+                f'padding:0.12rem 0.45rem;border-radius:4px;min-width:34px;text-align:center;">{act["priority"]}</span>'
+                f'<div style="flex:1;min-width:0;">'
+                f'<span style="font-weight:700;font-size:0.82rem;color:#1e293b;">{act["title"]}</span>'
+                f'<span style="color:#cbd5e1;margin:0 0.4rem;">›</span>'
+                f'<span style="font-size:0.74rem;color:#475569;">{act["action"]}</span>'
+                f'</div></div>'
+            )
+        st.markdown(f'<div>{_rows_html}</div>', unsafe_allow_html=True)
 
     # ════════════════════════════════════════
     # SECTION 4: 상세 분석 3탭
