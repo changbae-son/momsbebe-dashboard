@@ -1003,6 +1003,73 @@ def compute_worker_stats(days: int = 30) -> dict:
 
 
 # ─────────────────────────────────────────────
+# 원인-대응 효과 매트릭스 (P2-C)
+# ─────────────────────────────────────────────
+def compute_cause_action_matrix(days: int = 90) -> dict:
+    """원인(cause) × 대응유형(action_type) 매트릭스.
+    각 셀: count, measured, positive, avg_delta_pct, recovery_rate, sample_cases.
+    """
+    cutoff = (datetime.now(KST) - timedelta(days=days)).strftime("%Y-%m-%d")
+    cases = load_json(CASES_FILE, {"cases": []}).get("cases", [])
+
+    matrix: dict = {}  # (cause, action_type) -> dict
+    cause_totals: dict = {}
+    action_totals: dict = {}
+
+    for c in cases:
+        if c.get("date", "") < cutoff:
+            continue
+        cause = c.get("cause") or "other"
+        atype = c.get("action_type") or "no_issue"
+        key = (cause, atype)
+        if key not in matrix:
+            matrix[key] = {
+                "count": 0, "measured": 0, "positive": 0,
+                "delta_sum": 0.0, "samples": [],
+            }
+        cell = matrix[key]
+        cell["count"] += 1
+        cause_totals[cause] = cause_totals.get(cause, 0) + 1
+        action_totals[atype] = action_totals.get(atype, 0) + 1
+
+        oc = c.get("outcome_7d")
+        if isinstance(oc, dict) and oc.get("delta_pct") is not None:
+            d = oc["delta_pct"]
+            cell["measured"] += 1
+            cell["delta_sum"] += d
+            if d > 0:
+                cell["positive"] += 1
+            if len(cell["samples"]) < 5:
+                cell["samples"].append({
+                    "date": c.get("date", ""),
+                    "product": c.get("product_name", "")[:30],
+                    "delta": d,
+                    "worker": c.get("worker", "MD"),
+                })
+
+    # 평균/회복률 계산
+    out = {}
+    for key, cell in matrix.items():
+        m = cell["measured"]
+        out[key] = {
+            "count":         cell["count"],
+            "measured":      m,
+            "positive":      cell["positive"],
+            "avg_delta_pct": round(cell["delta_sum"] / m, 1) if m else None,
+            "recovery_rate": round(cell["positive"] / m * 100, 1) if m else None,
+            "samples":       cell["samples"],
+        }
+
+    return {
+        "matrix": out,
+        "cause_totals": cause_totals,
+        "action_totals": action_totals,
+        "total_cases": sum(cause_totals.values()),
+        "days": days,
+    }
+
+
+# ─────────────────────────────────────────────
 # 가격 이력 DB (P-A)
 # ─────────────────────────────────────────────
 def record_price_snapshot(keyword: str, df, our_df):
@@ -6944,7 +7011,7 @@ elif current_page == "daily_log":
         st.toast("✅ 대응 기록 완료")
 
     # ── 3 Tabs ──
-    tab1, tab_log, tab_perf, tab2, tab3, tab_settings = st.tabs(["\U0001f4c5 오늘 업무", "\U0001f4ca 대응 로그", "\U0001f465 직원 성과", "\U0001f4c6 주간/월간 계획", "\U0001f4cc 공유 메모", "\u2699\ufe0f 설정"])
+    tab1, tab_log, tab_perf, tab_matrix, tab2, tab3, tab_settings = st.tabs(["\U0001f4c5 오늘 업무", "\U0001f4ca 대응 로그", "\U0001f465 직원 성과", "\U0001f3af 원인-대응 매트릭스", "\U0001f4c6 주간/월간 계획", "\U0001f4cc 공유 메모", "\u2699\ufe0f 설정"])
 
     # ════════════════════════════════════════════
     # Tab 1: 오늘 업무
@@ -7468,6 +7535,182 @@ elif current_page == "daily_log":
                                     f"전 {oc.get('before_7d',0):.1f} → 후 {oc.get('after_7d',0)} "
                                     f"<span style='color:{_color};font-weight:700'>({d:+.1f}%)</span>",
                                     unsafe_allow_html=True)
+
+    # ════════════════════════════════════════════
+    # Tab Matrix: 원인-대응 효과 매트릭스 (P2-C)
+    # ════════════════════════════════════════════
+    with tab_matrix:
+        st.markdown('<div class="section-title"><span class="icon">🎯</span> 원인-대응 효과 매트릭스</div>', unsafe_allow_html=True)
+        st.caption("어떤 **원인**에 어떤 **대응**이 가장 효과적이었는지 7일 출고 변화율 기준으로 집계합니다. (셀 색상: 회복률 기반)")
+
+        _mc1, _mc2, _mc3 = st.columns([2, 1, 1])
+        with _mc2:
+            _mx_days = st.selectbox("기간", [30, 60, 90, 180, 365],
+                                     index=2, format_func=lambda x: f"최근 {x}일",
+                                     key="_matrix_days")
+        with _mc3:
+            if st.button("🔄 새로고침", key="_matrix_refresh", use_container_width=True):
+                st.rerun()
+
+        _mx = compute_cause_action_matrix(days=int(_mx_days))
+        _matrix = _mx["matrix"]
+        _ct = _mx["cause_totals"]
+        _at = _mx["action_totals"]
+
+        if _mx["total_cases"] == 0:
+            st.info(f"최근 {_mx_days}일 사례가 없습니다. 업무 완료 후 자동 집계됩니다.")
+        else:
+            # ── KPI ──
+            _measured_total = sum(v["measured"] for v in _matrix.values())
+            _positive_total = sum(v["positive"] for v in _matrix.values())
+            _avg_recovery = round(_positive_total / _measured_total * 100, 1) if _measured_total else None
+            _k1, _k2, _k3, _k4 = st.columns(4)
+            _k1.metric("총 사례", f"{_mx['total_cases']}건")
+            _k2.metric("측정 완료", f"{_measured_total}건")
+            _k3.metric("회복(출고+) 사례", f"{_positive_total}건")
+            _k4.metric("전체 회복률", f"{_avg_recovery}%" if _avg_recovery is not None else "—")
+
+            st.markdown("---")
+
+            # ── 매트릭스 표 ──
+            # 활성 cause/action 만 노출 (count > 0)
+            _causes = [k for k in CAUSE_TYPES.keys() if _ct.get(k, 0) > 0]
+            _actions = [k for k in ACTION_TYPES.keys() if _at.get(k, 0) > 0]
+
+            def _cell_color(rec_rate, measured):
+                if measured == 0:
+                    return "#f5f5f5", "#888"  # 미측정
+                if rec_rate is None:
+                    return "#f5f5f5", "#888"
+                if rec_rate >= 70:
+                    return "#c8e6c9", "#1b5e20"
+                if rec_rate >= 50:
+                    return "#dcedc8", "#33691e"
+                if rec_rate >= 30:
+                    return "#fff9c4", "#f57f17"
+                return "#ffcdd2", "#b71c1c"
+
+            # 헤더
+            _hdr_cols = st.columns([2.2] + [1.4] * len(_actions))
+            _hdr_cols[0].markdown("**원인 \\\\ 대응**")
+            for i, _a in enumerate(_actions):
+                _hdr_cols[i + 1].markdown(
+                    f"<div style='text-align:center;font-size:0.78rem;font-weight:700;'>"
+                    f"{ACTION_TYPES[_a]}<br><span style='color:#888;font-weight:400;'>n={_at.get(_a,0)}</span></div>",
+                    unsafe_allow_html=True,
+                )
+
+            # 행
+            for _c in _causes:
+                _row = st.columns([2.2] + [1.4] * len(_actions))
+                _row[0].markdown(
+                    f"<div style='font-size:0.85rem;font-weight:700;padding-top:0.5rem;'>"
+                    f"{CAUSE_TYPES[_c]}<br><span style='color:#888;font-weight:400;font-size:0.7rem;'>n={_ct.get(_c,0)}</span></div>",
+                    unsafe_allow_html=True,
+                )
+                for i, _a in enumerate(_actions):
+                    cell = _matrix.get((_c, _a))
+                    if not cell:
+                        _row[i + 1].markdown(
+                            "<div style='background:#fafafa;border:1px dashed #ddd;border-radius:6px;padding:0.4rem;text-align:center;color:#bbb;font-size:0.75rem;'>—</div>",
+                            unsafe_allow_html=True,
+                        )
+                        continue
+                    _bg, _fg = _cell_color(cell["recovery_rate"], cell["measured"])
+                    _delta_txt = f"{cell['avg_delta_pct']:+.1f}%" if cell["avg_delta_pct"] is not None else "—"
+                    _rec_txt = f"회복 {cell['recovery_rate']}%" if cell["recovery_rate"] is not None else "미측정"
+                    _row[i + 1].markdown(
+                        f"<div style='background:{_bg};border-radius:6px;padding:0.4rem;text-align:center;'>"
+                        f"<div style='font-size:0.95rem;font-weight:800;color:{_fg};'>{_delta_txt}</div>"
+                        f"<div style='font-size:0.68rem;color:{_fg};'>{_rec_txt}</div>"
+                        f"<div style='font-size:0.65rem;color:#666;'>사례 {cell['count']} · 측정 {cell['measured']}</div>"
+                        f"</div>",
+                        unsafe_allow_html=True,
+                    )
+
+            # ── 범례 ──
+            st.markdown("""
+<div style='display:flex;gap:0.6rem;font-size:0.7rem;color:#555;margin-top:0.7rem;'>
+  <span style='background:#c8e6c9;padding:0.2rem 0.5rem;border-radius:4px;'>회복 ≥70%</span>
+  <span style='background:#dcedc8;padding:0.2rem 0.5rem;border-radius:4px;'>50–70%</span>
+  <span style='background:#fff9c4;padding:0.2rem 0.5rem;border-radius:4px;'>30–50%</span>
+  <span style='background:#ffcdd2;padding:0.2rem 0.5rem;border-radius:4px;'>&lt;30%</span>
+  <span style='background:#f5f5f5;padding:0.2rem 0.5rem;border-radius:4px;color:#888;'>미측정</span>
+</div>
+            """, unsafe_allow_html=True)
+
+            st.markdown("---")
+
+            # ── 인사이트 ──
+            st.markdown("##### 💡 인사이트")
+            _insights = []
+
+            # 1) 원인별 최적 대응
+            for _c in _causes:
+                _candidates = [
+                    (a, _matrix[(_c, a)]) for a in _actions
+                    if (_c, a) in _matrix and _matrix[(_c, a)]["measured"] >= 2
+                ]
+                if not _candidates:
+                    continue
+                _candidates.sort(key=lambda x: (x[1]["recovery_rate"] or 0, x[1]["avg_delta_pct"] or 0), reverse=True)
+                _best_a, _best_v = _candidates[0]
+                if _best_v["recovery_rate"] is not None and _best_v["recovery_rate"] >= 50:
+                    _insights.append(
+                        f"✅ **{CAUSE_TYPES[_c]}** → **{ACTION_TYPES[_best_a]}** 추천 "
+                        f"(회복률 {_best_v['recovery_rate']}%, 평균 출고 {_best_v['avg_delta_pct']:+.1f}%, 측정 {_best_v['measured']}건)"
+                    )
+
+            # 2) 비효율 조합 (회복률 < 30% & measured >= 3)
+            _bad = [
+                (k, v) for k, v in _matrix.items()
+                if v["measured"] >= 3 and v["recovery_rate"] is not None and v["recovery_rate"] < 30
+            ]
+            for (_c, _a), v in sorted(_bad, key=lambda x: x[1]["recovery_rate"] or 0)[:3]:
+                _insights.append(
+                    f"⚠️ **{CAUSE_TYPES.get(_c, _c)}** + **{ACTION_TYPES.get(_a, _a)}** 비효율 "
+                    f"(회복률 {v['recovery_rate']}%, 평균 {v['avg_delta_pct']:+.1f}%) — 다른 대응 검토 필요"
+                )
+
+            # 3) 측정 부족 안내
+            _untested = sum(1 for v in _matrix.values() if v["count"] >= 2 and v["measured"] == 0)
+            if _untested > 0:
+                _insights.append(f"📊 **{_untested}개 조합**이 사례 2건+ 있으나 7일 측정값 부재 — 직원 성과 탭의 '7일 결과 갱신'을 실행하세요.")
+
+            if _insights:
+                for _msg in _insights:
+                    st.markdown(f"- {_msg}")
+            else:
+                st.info("측정된 사례가 부족해 인사이트를 도출할 수 없습니다. 사례가 누적되면 자동으로 추천이 표시됩니다.")
+
+            # ── 셀 상세 (드릴다운) ──
+            st.markdown("---")
+            st.markdown("##### 🔍 셀 상세 — 사례 보기")
+            _drill_options = [
+                f"{CAUSE_TYPES.get(_c, _c)} × {ACTION_TYPES.get(_a, _a)} (사례 {v['count']}건)"
+                for (_c, _a), v in sorted(_matrix.items(), key=lambda x: -x[1]["count"])
+                if v["count"] > 0
+            ]
+            _drill_keys = [
+                (_c, _a) for (_c, _a), v in sorted(_matrix.items(), key=lambda x: -x[1]["count"])
+                if v["count"] > 0
+            ]
+            if _drill_options:
+                _sel_idx = st.selectbox("조합 선택", range(len(_drill_options)),
+                                          format_func=lambda i: _drill_options[i],
+                                          key="_matrix_drill")
+                _sel_key = _drill_keys[_sel_idx]
+                _sel_cell = _matrix[_sel_key]
+                if _sel_cell["samples"]:
+                    for s in _sel_cell["samples"]:
+                        _color = "#2e7d32" if s["delta"] > 0 else ("#d32f2f" if s["delta"] < 0 else "#888")
+                        st.markdown(
+                            f"- **{s['date']}** · {s['product']} ({s['worker']}) "
+                            f"<span style='color:{_color};font-weight:700;'>({s['delta']:+.1f}%)</span>",
+                            unsafe_allow_html=True,
+                        )
+                else:
+                    st.caption("이 조합의 측정 완료 사례가 아직 없습니다.")
 
     # ════════════════════════════════════════════
     # Tab 2: 주간/월간 계획 (리디자인)
