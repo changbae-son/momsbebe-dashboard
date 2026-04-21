@@ -2715,10 +2715,10 @@ def show_quick_price_dialog():
 
     with st.spinner(f"📡 {pname[:30]} 가격 조회 중..."):
         try:
-            _df, _our_df = search_products(pname)
+            _df, _is_demo = search_products(pname)
         except Exception as _e:
             st.error(f"검색 실패: {_e}")
-            _df, _our_df = None, None
+            _df = None
 
     if _df is None or len(_df) == 0:
         st.info("검색 결과가 없습니다.")
@@ -2728,6 +2728,16 @@ def show_quick_price_dialog():
     _min_p = int(_top["가격(원)"].min())
     _avg_p = int(_top["가격(원)"].mean())
     _max_p = int(_top["가격(원)"].max())
+
+    # 우리매장 행 추출 (DataFrame 의 '우리매장' 컬럼 또는 판매처명으로 필터)
+    _our_df = None
+    try:
+        if "우리매장" in _df.columns:
+            _our_df = _df[_df["우리매장"] == True]
+        else:
+            _our_df = _df[_df["판매처"].apply(is_our_store)]
+    except Exception:
+        _our_df = None
 
     # KPI 한 줄
     _our_first = _our_df.iloc[0] if (_our_df is not None and len(_our_df) > 0) else None
