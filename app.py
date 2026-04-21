@@ -40,20 +40,20 @@ st.markdown("""
 
     .block-container { padding-top: 1rem; max-width: 1200px; }
 
-    /* ── 헤더 배너 ── */
+    /* ── 헤더 배너 (슬림) ── */
     .header-banner {
         background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
         color: white;
-        padding: 1.8rem 2rem;
-        border-radius: 16px;
-        margin-bottom: 1.5rem;
+        padding: 0.7rem 1.2rem;
+        border-radius: 10px;
+        margin-bottom: 0.7rem;
         display: flex;
         align-items: center;
-        gap: 1.2rem;
-        box-shadow: 0 8px 32px rgba(102, 126, 234, 0.25);
+        gap: 0.8rem;
+        box-shadow: 0 2px 8px rgba(102, 126, 234, 0.18);
     }
     .header-banner .logo {
-        width: 56px; height: 56px;
+        width: 36px; height: 36px;
         border-radius: 50%;
         background: linear-gradient(135deg, #e8192c 0%, #ff4757 100%);
         display: flex; flex-direction: column;
@@ -90,10 +90,10 @@ st.markdown("""
         letter-spacing: 0.3px; margin-top: 1px;
     }
     .header-banner h1 {
-        margin: 0; font-size: 1.7rem; font-weight: 700; letter-spacing: -0.5px;
+        margin: 0; font-size: 1.05rem; font-weight: 700; letter-spacing: -0.3px;
     }
     .header-banner p {
-        margin: 0.2rem 0 0 0; font-size: 0.9rem; opacity: 0.85;
+        margin: 0.1rem 0 0 0; font-size: 0.72rem; opacity: 0.8;
     }
     .header-right {
         margin-left: auto;
@@ -652,6 +652,7 @@ PENDING_ALERTS_FILE = os.path.join(DATA_DIR, "pending_alerts.json")
 CASES_FILE          = os.path.join(DATA_DIR, "cases.json")
 PRICE_HISTORY_FILE  = os.path.join(DATA_DIR, "price_history.json")
 PINNED_SKUS_FILE    = os.path.join(DATA_DIR, "pinned_skus.json")
+WEEKLY_REPORT_FILE  = os.path.join(DATA_DIR, "weekly_report_state.json")
 
 # ─────────────────────────────────────────────
 # 플랫폼 관리
@@ -836,6 +837,92 @@ def recompute_pending_outcomes(force: bool = False) -> int:
 # ─────────────────────────────────────────────
 # 직원 성과 집계 (P2-B)
 # ─────────────────────────────────────────────
+def build_weekly_report() -> str:
+    """지난 월~일 1주일 요약을 텔레그램용 마크다운 문자열로 빌드."""
+    now = datetime.now(KST)
+    weekday = now.weekday()  # 월=0
+    this_mon = (now - timedelta(days=weekday)).date()
+    last_mon = this_mon - timedelta(days=7)
+    last_sun = this_mon - timedelta(days=1)
+    s_str = last_mon.strftime("%Y-%m-%d")
+    e_str = last_sun.strftime("%Y-%m-%d")
+
+    tasks = load_json(TASKS_FILE, {"tasks": []}).get("tasks", [])
+    cases = load_json(CASES_FILE, {"cases": []}).get("cases", [])
+
+    week_tasks = [t for t in tasks if s_str <= t.get("due","") <= e_str]
+    done_tasks = [t for t in week_tasks if t.get("done")]
+    pending = [t for t in week_tasks if not t.get("done")]
+
+    week_cases = [c for c in cases if s_str <= c.get("date","") <= e_str]
+
+    # 작업자 Top3
+    worker_count: dict = {}
+    for t in done_tasks:
+        w = (t.get("action", {}) or {}).get("worker") or t.get("worker") or "MD"
+        worker_count[w] = worker_count.get(w, 0) + 1
+    worker_top = sorted(worker_count.items(), key=lambda x: -x[1])[:3]
+
+    # 원인 Top3
+    cause_count: dict = {}
+    for c in week_cases:
+        cs = c.get("cause") or "기타"
+        cause_count[cs] = cause_count.get(cs, 0) + 1
+    cause_top = sorted(cause_count.items(), key=lambda x: -x[1])[:3]
+
+    # 효과 좋았던 액션 Top3 (delta_pct > 0)
+    measured = [c for c in week_cases
+                if isinstance(c.get("outcome_7d"), dict)
+                and c["outcome_7d"].get("delta_pct") is not None]
+    measured.sort(key=lambda x: x["outcome_7d"]["delta_pct"], reverse=True)
+    best = measured[:3]
+
+    lines = []
+    lines.append(f"📊 *주간 업무 리포트* ({s_str} ~ {e_str})")
+    lines.append("")
+    lines.append(f"✅ 완료: *{len(done_tasks)}건* / 미완료: {len(pending)}건")
+    lines.append(f"📂 사례 등록: {len(week_cases)}건  (측정완료 {len(measured)}건)")
+    lines.append("")
+    if worker_top:
+        lines.append("👥 *작업자 Top3*")
+        for w, n in worker_top:
+            lines.append(f"  • {w} — {n}건")
+        lines.append("")
+    if cause_top:
+        lines.append("🎯 *주요 원인 Top3*")
+        for cs, n in cause_top:
+            lines.append(f"  • {CAUSE_TYPES.get(cs, cs)} — {n}건")
+        lines.append("")
+    if best:
+        lines.append("🏆 *효과 좋았던 액션 Top3* (7일 출고 변화)")
+        for c in best:
+            d = c["outcome_7d"]["delta_pct"]
+            lines.append(f"  • {c.get('product_name','')} ({c.get('action_label','')}) → +{d:.1f}%")
+        lines.append("")
+    if pending:
+        lines.append(f"⚠️ 미완료 {len(pending)}건 — 이번주 carry-over")
+    return "\n".join(lines)
+
+
+def maybe_send_weekly_report():
+    """월요일 09시 이후 1회 자동 발송 (이번 월요일에 아직 안 보냈을 때)."""
+    now = datetime.now(KST)
+    if now.weekday() != 0 or now.hour < 9:
+        return
+    week_key = now.strftime("%Y-W%W")
+    state = load_json(WEEKLY_REPORT_FILE, {"last_sent_week": ""})
+    if state.get("last_sent_week") == week_key:
+        return
+    msg = build_weekly_report()
+    try:
+        send_telegram(msg)
+        state["last_sent_week"] = week_key
+        state["last_sent_at"] = now.strftime("%Y-%m-%d %H:%M")
+        save_json(WEEKLY_REPORT_FILE, state)
+    except Exception:
+        pass
+
+
 def compute_worker_stats(days: int = 30) -> dict:
     """최근 N일 사례 + 작업로그 기준 작업자별 집계."""
     cutoff = (datetime.now(KST) - timedelta(days=days)).strftime("%Y-%m-%d")
@@ -4178,6 +4265,7 @@ current_page = st.session_state.get("current_page", "dashboard")
 # 앱 로드 시 백그라운드 작업
 flush_pending_alerts()
 check_outcomes_7d()
+maybe_send_weekly_report()
 
 
 # ─────────────────────────────────────────────
@@ -5327,12 +5415,13 @@ elif current_page == "daily_log":
 
     /* ── 송장 미출력 오버레이 ── */
     .shipment-pending {
-        background: #f8f9fa; border: 2px dashed #ccc; border-radius: 12px;
-        padding: 2rem 1rem; text-align: center; color: #888; margin: 1rem 0;
+        background: #f8f9fa; border: 1px dashed #d0d0d0; border-radius: 8px;
+        padding: 0.5rem 0.8rem; text-align: left; color: #888; margin: 0.4rem 0;
+        display: flex; align-items: center; gap: 0.5rem;
     }
-    .shipment-pending .sp-icon { font-size: 2.5rem; margin-bottom: 0.5rem; }
-    .shipment-pending .sp-title { font-size: 1rem; font-weight: 700; color: #555; }
-    .shipment-pending .sp-desc { font-size: 0.82rem; color: #999; margin-top: 0.3rem; }
+    .shipment-pending .sp-icon { font-size: 1rem; }
+    .shipment-pending .sp-title { font-size: 0.8rem; font-weight: 600; color: #666; display: inline; }
+    .shipment-pending .sp-desc { font-size: 0.7rem; color: #999; display: inline; margin-left: 0.4rem; }
 
     /* ── 섹션 헤더 ── */
     .log-section {
@@ -6119,15 +6208,46 @@ elif current_page == "daily_log":
     with tab_perf:
         st.markdown('<div class="section-title"><span class="icon">👥</span> 직원 성과 (최근 30일)</div>', unsafe_allow_html=True)
 
-        _pc1, _pc2 = st.columns([3, 1])
+        _pc1, _pc2, _pc3 = st.columns([2, 1, 1])
         with _pc2:
             if st.button("🔄 7일 결과 갱신", width="stretch", help="OneWMS에서 출고량을 조회해 사례 outcome_7d를 채웁니다."):
                 with st.spinner("OneWMS 조회 중..."):
                     n_upd = recompute_pending_outcomes(force=False)
                 st.success(f"✅ {n_upd}건 갱신")
                 st.rerun()
+        with _pc3:
+            if st.button("📨 주간 리포트", width="stretch", help="지난주 요약을 미리보고 텔레그램으로 즉시 발송합니다."):
+                st.session_state["_show_weekly_preview"] = True
         with _pc1:
             st.caption("**완료 건수 / 평균 대응 시간 / 회복률(7일 출고 +)** 기준 작업자별 집계. 회복률은 OneWMS 출고 데이터가 산출된 사례 한정.")
+
+        # 주간 리포트 미리보기/발송
+        if st.session_state.get("_show_weekly_preview"):
+            _wr_msg = build_weekly_report()
+            with st.container(border=True):
+                st.markdown("**📨 지난주 리포트 미리보기**")
+                st.code(_wr_msg, language="markdown")
+                _wb1, _wb2, _wb3 = st.columns([1, 1, 3])
+                with _wb1:
+                    if st.button("📤 텔레그램 발송", type="primary", key="_wr_send"):
+                        try:
+                            send_telegram(_wr_msg)
+                            _state = load_json(WEEKLY_REPORT_FILE, {})
+                            _state["last_sent_week"] = datetime.now(KST).strftime("%Y-W%W")
+                            _state["last_sent_at"] = datetime.now(KST).strftime("%Y-%m-%d %H:%M")
+                            save_json(WEEKLY_REPORT_FILE, _state)
+                            st.success("✅ 발송 완료")
+                            st.session_state["_show_weekly_preview"] = False
+                            st.rerun()
+                        except Exception as e:
+                            st.error(f"발송 실패: {e}")
+                with _wb2:
+                    if st.button("닫기", key="_wr_close"):
+                        st.session_state["_show_weekly_preview"] = False
+                        st.rerun()
+            _state = load_json(WEEKLY_REPORT_FILE, {})
+            if _state.get("last_sent_at"):
+                st.caption(f"마지막 발송: {_state.get('last_sent_at')} ({_state.get('last_sent_week','')})")
 
         _stats = compute_worker_stats(days=30)
         if not _stats:
