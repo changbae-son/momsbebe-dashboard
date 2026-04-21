@@ -5245,27 +5245,98 @@ elif current_page == "price_monitor":
 
             with chart_col:
                 chart_df = top7_df.copy()
-                bar_colors = ['#f59e0b' if is_our_store(m) else '#667eea' for m in chart_df["판매처"]]
+                _is_ours_list  = [bool(is_our_store(m)) for m in chart_df["판매처"]]
+                bar_colors     = ['#f59e0b' if o else '#667eea' for o in _is_ours_list]
+                line_colors    = ['#b45309' if o else 'rgba(0,0,0,0)' for o in _is_ours_list]
+                line_widths    = [2 if o else 0 for o in _is_ours_list]
+
+                # Y축 라벨: 🏪판매처 · 상품명(22자) — 우리매장은 🟠 prefix
+                _y_labels = []
+                for _, _r in chart_df.iterrows():
+                    _nm   = (_r["상품명"] or "")[:22]
+                    _mall = _r["판매처"]
+                    _ic   = "🟠" if is_our_store(_mall) else "🏪"
+                    _y_labels.append(f"{_ic} {_mall} · {_nm}")
+
+                # 가격 라벨: 긴 막대는 안쪽 흰색, 짧은 막대는 바깥쪽
+                _max_price   = float(chart_df["가격(원)"].max() or 0)
+                _label_pos   = ["inside" if p >= _max_price * 0.55 else "outside"
+                                for p in chart_df["가격(원)"]]
+                _label_color = ["white" if p == "inside" else "#374151" for p in _label_pos]
+
+                # 평균 대비 차액/비율 (호버용)
+                _avg_for_chart = float(chart_df["가격(원)"].mean() or 0)
+                _diff_pct = [((p - _avg_for_chart) / _avg_for_chart * 100.0) if _avg_for_chart else 0
+                             for p in chart_df["가격(원)"]]
+                _custom = list(zip(
+                    chart_df["판매처"].tolist(),
+                    chart_df["순위"].astype(int).tolist(),
+                    [f"{d:+.1f}" for d in _diff_pct],
+                    [f"{int(p - _avg_for_chart):+,}" for p in chart_df["가격(원)"]],
+                ))
 
                 fig = go.Figure()
                 fig.add_trace(go.Bar(
-                    y=chart_df["상품명"].str[:18],
+                    y=_y_labels,
                     x=chart_df["가격(원)"],
                     text=[f"{p:,.0f}원" for p in chart_df["가격(원)"]],
-                    textposition="outside",
+                    textposition=_label_pos,
+                    textfont=dict(size=11, color=_label_color),
+                    cliponaxis=False,
                     orientation="h",
-                    marker=dict(color=bar_colors, cornerradius=6),
-                    hovertemplate="<b>%{y}</b><br>가격: %{x:,.0f}원<extra></extra>",
+                    marker=dict(
+                        color=bar_colors,
+                        cornerradius=6,
+                        line=dict(color=line_colors, width=line_widths),
+                    ),
+                    customdata=_custom,
+                    hovertemplate=(
+                        "<b>%{customdata[0]} · %{customdata[1]}위</b><br>"
+                        "가격: %{x:,.0f}원<br>"
+                        "평균 대비: %{customdata[3]}원 (%{customdata[2]}%)"
+                        "<extra></extra>"
+                    ),
                 ))
+
+                # 평균가 세로 점선
+                fig.add_vline(
+                    x=_avg_for_chart,
+                    line=dict(color="#94a3b8", width=1, dash="dash"),
+                    annotation_text=f"평균 {_avg_for_chart:,.0f}원",
+                    annotation_position="top",
+                    annotation_font=dict(size=10, color="#64748b"),
+                )
+
+                # 우리 가격(첫 번째 우리매장) 세로 점선
+                _our_in_top = chart_df[chart_df["우리매장"] == True] if "우리매장" in chart_df.columns else None
+                if _our_in_top is not None and len(_our_in_top) > 0:
+                    _our_price_chart = float(_our_in_top.iloc[0]["가격(원)"])
+                    fig.add_vline(
+                        x=_our_price_chart,
+                        line=dict(color="#f59e0b", width=1.5, dash="dot"),
+                        annotation_text=f"🟠 우리 {_our_price_chart:,.0f}원",
+                        annotation_position="bottom",
+                        annotation_font=dict(size=10, color="#b45309"),
+                    )
+
+                _our_count_top = int(sum(_is_ours_list))
+                _title_main = f"Top {len(chart_df)} 판매처 가격 비교 — 평균 대비"
+                _title_sub  = (f"평균 {_avg_for_chart:,.0f}원 · 우리매장 {_our_count_top}건 노출"
+                               if _our_count_top else f"평균 {_avg_for_chart:,.0f}원 · 우리매장 미노출")
+
                 fig.update_layout(
-                    title=dict(text="가격 비교 (🟠 우리매장)", font=dict(size=13)),
-                    xaxis=dict(title="", gridcolor="rgba(128,128,128,0.1)"),
-                    yaxis=dict(title="", autorange="reversed"),
-                    height=320,
-                    margin=dict(t=40, b=20, l=10, r=60),
+                    title=dict(
+                        text=f"{_title_main}<br><span style='font-size:10px;color:#94a3b8;'>{_title_sub}</span>",
+                        font=dict(size=13),
+                    ),
+                    xaxis=dict(title="", gridcolor="rgba(128,128,128,0.1)", tickformat=",d"),
+                    yaxis=dict(title="", autorange="reversed", tickfont=dict(size=10)),
+                    height=360,
+                    margin=dict(t=60, b=20, l=10, r=80),
                     plot_bgcolor="rgba(0,0,0,0)",
                     paper_bgcolor="rgba(0,0,0,0)",
                     font=dict(size=11),
+                    showlegend=False,
                 )
                 st.plotly_chart(fig, width="stretch")
 
