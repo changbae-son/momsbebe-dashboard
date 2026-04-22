@@ -4556,7 +4556,7 @@ def _render_board_mode():
     _progress_pct = int((_done_n + _skip_n) / _total_n * 100) if _total_n else 0
 
     _h1, _h2, _h3, _h4 = st.columns([3, 2, 2, 1])
-    _h1.markdown(f"### 🎯 오늘 할일 보드 — {now.strftime('%Y-%m-%d (%a) %H:%M')}")
+    _h1.markdown(f"### 🎯 오늘 할일 보드 — {now.strftime('%Y-%m-%d (%a)')}")
     _h2.metric("Stage", f"{cur_stage}/4", help=stages[cur_stage-1]["title"])
     _h3.metric("진행", f"{_done_n + _skip_n}/{_total_n}", f"{_progress_pct}%")
     if _h4.button("🔄", key="board_refresh", use_container_width=True, help="새로고침"):
@@ -4642,13 +4642,8 @@ def _render_board_mode():
                         f"<div class='board-skip-item'>{it['icon']} {it['title']} — <span style='color:#94a3b8;'>해당 없음 (자동 스킵)</span></div>",
                         unsafe_allow_html=True)
                 elif _is_done:
-                    _t = state["completed"][_id]
-                    try:
-                        _ts = datetime.fromisoformat(_t).strftime("%H:%M")
-                    except Exception:
-                        _ts = ""
                     st.markdown(
-                        f"<div class='board-done-item'>✅ {it['icon']} {it['title']} <span style='float:right;'>{_ts}</span></div>",
+                        f"<div class='board-done-item'>✅ {it['icon']} {it['title']}</div>",
                         unsafe_allow_html=True)
                 elif _is_skip:
                     _r = state["skipped"][_id].get("reason", "")
@@ -4677,10 +4672,9 @@ def _render_board_mode():
             st.caption("아직 처리한 항목 없음")
         else:
             for l in reversed(_logs[-20:]):
-                _ts = l.get("at", "")[-8:][:5]
                 _act = {"done":"✅","skip":"⏭","snooze":"⏰"}.get(l.get("action",""), "·")
                 _r = f" ({l.get('reason','')})" if l.get("reason") else ""
-                st.caption(f"{_ts} {_act} {l.get('id','')}{_r}")
+                st.caption(f"{_act} {l.get('id','')}{_r}")
 
     st.caption(f"📌 우측 모니터에 메인 앱(작업 화면), 좌측에 이 보드 화면을 띄워 사용하세요. URL 끝에 `?mode=board`")
 
