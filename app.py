@@ -4496,14 +4496,91 @@ def generate_manual_docx() -> bytes:
     from docx import Document
     from docx.shared import Pt, RGBColor, Cm
     from docx.enum.text import WD_ALIGN_PARAGRAPH
+    from docx.oxml.ns import qn
+    from docx.oxml import OxmlElement
     from io import BytesIO
+
+    KOR_FONT = "맑은 고딕"
+
+    def _set_kor_font_on_rpr(rpr):
+        """rPr 요소에 한글(eastAsia) + 영문(ascii/hAnsi) 폰트를 동시 설정."""
+        rFonts = rpr.find(qn("w:rFonts"))
+        if rFonts is None:
+            rFonts = OxmlElement("w:rFonts")
+            rpr.insert(0, rFonts)
+        rFonts.set(qn("w:ascii"),    KOR_FONT)
+        rFonts.set(qn("w:hAnsi"),    KOR_FONT)
+        rFonts.set(qn("w:eastAsia"), KOR_FONT)
+        rFonts.set(qn("w:cs"),       KOR_FONT)
+
+    def _set_kor_font(run):
+        """Run에 한글 폰트 강제 적용 (eastAsia 슬롯 포함 — 한글 □□□ 깨짐 방지)."""
+        run.font.name = KOR_FONT
+        rpr = run._r.get_or_add_rPr()
+        _set_kor_font_on_rpr(rpr)
 
     doc = Document()
 
-    # 기본 폰트 (맑은 고딕)
+    # 기본 스타일에 한글 폰트 적용
     _style = doc.styles["Normal"]
-    _style.font.name = "맑은 고딕"
+    _style.font.name = KOR_FONT
     _style.font.size = Pt(11)
+    _rpr = _style.element.get_or_add_rPr()
+    _set_kor_font_on_rpr(_rpr)
+
+    # 표/Heading 등 다른 스타일에도 한글 폰트
+    for _sname in ["Heading 1", "Heading 2", "Heading 3",
+                   "List Bullet", "List Number",
+                   "Light Grid Accent 1", "Table Grid"]:
+        try:
+            _s = doc.styles[_sname]
+            if hasattr(_s, "element"):
+                _r = _s.element.get_or_add_rPr() if hasattr(_s.element, "get_or_add_rPr") else None
+                if _r is not None:
+                    _set_kor_font_on_rpr(_r)
+        except Exception:
+            pass
+
+    # add_paragraph / add_heading / table.cell 호출 시 자동으로 폰트 적용되도록 monkey-patch
+    _orig_add_para = doc.add_paragraph
+    def _add_para_kor(text="", style=None):
+        p = _orig_add_para(text, style=style) if style else _orig_add_para(text)
+        for r in p.runs:
+            _set_kor_font(r)
+        return p
+    doc.add_paragraph = _add_para_kor
+
+    _orig_add_heading = doc.add_heading
+    def _add_heading_kor(text="", level=1):
+        h = _orig_add_heading(text, level=level)
+        for r in h.runs:
+            _set_kor_font(r)
+        return h
+    doc.add_heading = _add_heading_kor
+
+    _orig_add_table = doc.add_table
+    def _add_table_kor(rows, cols, style=None):
+        t = _orig_add_table(rows=rows, cols=cols, style=style) if style else _orig_add_table(rows=rows, cols=cols)
+        # 셀 텍스트가 나중에 들어올 때를 대비해 _table 객체에 후킹
+        _orig_cell = t.cell
+        def _cell_kor(r, c):
+            cell = _orig_cell(r, c)
+            # cell.text 세터 호출 후 폰트 적용을 위한 프록시
+            class _CellProxy:
+                def __init__(self, _c): self._c = _c
+                def __getattr__(self, n): return getattr(self._c, n)
+                @property
+                def text(self): return self._c.text
+                @text.setter
+                def text(self, v):
+                    self._c.text = v
+                    for p in self._c.paragraphs:
+                        for r in p.runs:
+                            _set_kor_font(r)
+            return _CellProxy(cell)
+        t.cell = _cell_kor
+        return t
+    doc.add_table = _add_table_kor
 
     # ── 표지 ──
     _t = doc.add_paragraph()
@@ -4511,16 +4588,19 @@ def generate_manual_docx() -> bytes:
     _r = _t.add_run("\n\n\n신아인터네셔날\n업무활용 매뉴얼")
     _r.font.size = Pt(28); _r.font.bold = True
     _r.font.color.rgb = RGBColor(0x1d, 0x4e, 0xd8)
+    _set_kor_font(_r)
 
     _v = doc.add_paragraph()
     _v.alignment = WD_ALIGN_PARAGRAPH.CENTER
     _vr = _v.add_run("V1.0\n\n신입사원용 — 처음 보는 사람도 이해할 수 있게")
     _vr.font.size = Pt(14); _vr.font.color.rgb = RGBColor(0x64, 0x74, 0x8b)
+    _set_kor_font(_vr)
 
     _d = doc.add_paragraph()
     _d.alignment = WD_ALIGN_PARAGRAPH.CENTER
     _dr = _d.add_run(f"\n\n발행일: 2026-04-22\n작성: 신아인터네셔날 운영팀")
     _dr.font.size = Pt(11); _dr.font.color.rgb = RGBColor(0x94, 0xa3, 0xb8)
+    _set_kor_font(_dr)
 
     doc.add_page_break()
 
@@ -4707,6 +4787,17 @@ def generate_manual_docx() -> bytes:
     _end.alignment = WD_ALIGN_PARAGRAPH.CENTER
     _er = _end.add_run("— 끝 —\n신아인터네셔날 업무활용 매뉴얼 V1.0")
     _er.font.color.rgb = RGBColor(0x94, 0xa3, 0xb8)
+
+    # ── 최종 안전 패스: 문서 내 모든 run에 한글 폰트 강제 적용 ──
+    for _para in doc.paragraphs:
+        for _r in _para.runs:
+            _set_kor_font(_r)
+    for _tbl in doc.tables:
+        for _row in _tbl.rows:
+            for _cell in _row.cells:
+                for _p in _cell.paragraphs:
+                    for _r in _p.runs:
+                        _set_kor_font(_r)
 
     buf = BytesIO()
     doc.save(buf)
