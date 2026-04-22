@@ -4489,6 +4489,231 @@ def _fetch_orders_range(start_date: str, end_date: str) -> list:
 
 
 # ═════════════════════════════════════════════
+# 📘 사용 매뉴얼 V1.0 — Word 파일 생성기 (신입 친화)
+# ═════════════════════════════════════════════
+def generate_manual_docx() -> bytes:
+    """신입사원도 이해 가능한 친절한 매뉴얼 Word 파일 생성. bytes 반환."""
+    from docx import Document
+    from docx.shared import Pt, RGBColor, Cm
+    from docx.enum.text import WD_ALIGN_PARAGRAPH
+    from io import BytesIO
+
+    doc = Document()
+
+    # 기본 폰트 (맑은 고딕)
+    _style = doc.styles["Normal"]
+    _style.font.name = "맑은 고딕"
+    _style.font.size = Pt(11)
+
+    # ── 표지 ──
+    _t = doc.add_paragraph()
+    _t.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    _r = _t.add_run("\n\n\n신아인터네셔날\n업무활용 매뉴얼")
+    _r.font.size = Pt(28); _r.font.bold = True
+    _r.font.color.rgb = RGBColor(0x1d, 0x4e, 0xd8)
+
+    _v = doc.add_paragraph()
+    _v.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    _vr = _v.add_run("V1.0\n\n신입사원용 — 처음 보는 사람도 이해할 수 있게")
+    _vr.font.size = Pt(14); _vr.font.color.rgb = RGBColor(0x64, 0x74, 0x8b)
+
+    _d = doc.add_paragraph()
+    _d.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    _dr = _d.add_run(f"\n\n발행일: 2026-04-22\n작성: 신아인터네셔날 운영팀")
+    _dr.font.size = Pt(11); _dr.font.color.rgb = RGBColor(0x94, 0xa3, 0xb8)
+
+    doc.add_page_break()
+
+    # ── 목차 ──
+    doc.add_heading("📑 목차", level=1)
+    _toc = [
+        "1장. 이 시스템이 뭔가요? (3분 요약)",
+        "2장. 화면 두 개를 동시에 띄워 쓰는 이유",
+        "3장. 매일 아침 출근하면 이 순서대로",
+        "4장. 화면별 기능 한눈에 보기",
+        "5장. 자주 쓰는 버튼 설명",
+        "6장. 자주 묻는 질문 (Q&A)",
+        "7장. 첫 1주일 체크리스트",
+        "8장. 문제가 생겼을 때",
+    ]
+    for line in _toc:
+        doc.add_paragraph(line, style="List Number")
+
+    doc.add_page_break()
+
+    # ── 1장 ──
+    doc.add_heading("1장. 이 시스템이 뭔가요? (3분 요약)", level=1)
+    doc.add_paragraph(
+        "신아인터네셔날 업무 대시보드는 '오늘 회사에서 무엇을 해야 하는지'를 "
+        "자동으로 알려주는 컴퓨터 화면입니다. 매일 아침 출근해서 이 화면만 켜면 "
+        "오늘 할 일이 1순위부터 순서대로 나옵니다."
+    )
+    doc.add_heading("쉽게 비유하면?", level=2)
+    doc.add_paragraph("🍳 식당의 '주방 주문서'와 같습니다.", style="List Bullet")
+    doc.add_paragraph("주문서 위에서부터 한 장씩 처리하면 됩니다.", style="List Bullet")
+    doc.add_paragraph("처리한 항목은 자동으로 기록됩니다.", style="List Bullet")
+
+    doc.add_heading("크게 두 개의 화면이 있습니다", level=2)
+    _t1 = doc.add_table(rows=3, cols=2); _t1.style = "Light Grid Accent 1"
+    _t1.cell(0,0).text = "화면"; _t1.cell(0,1).text = "역할"
+    _t1.cell(1,0).text = "🎯 오늘 할일 보드"; _t1.cell(1,1).text = "오늘 할 일을 1→4단계 순서로 알려줌 (왼쪽 모니터)"
+    _t1.cell(2,0).text = "🖥️ 메인 대시보드"; _t1.cell(2,1).text = "실제 데이터 보고 작업하는 곳 (오른쪽 모니터)"
+
+    doc.add_page_break()
+
+    # ── 2장 ──
+    doc.add_heading("2장. 화면 두 개를 동시에 띄워 쓰는 이유", level=1)
+    doc.add_paragraph(
+        "왼쪽 모니터에는 '보드' 화면을, 오른쪽 모니터에는 '대시보드' 화면을 "
+        "동시에 띄워 놓고 일합니다. 모니터가 한 개뿐이면 브라우저 탭 두 개를 "
+        "왼쪽/오른쪽으로 나란히 두면 됩니다."
+    )
+    doc.add_heading("왜 분리하나요?", level=2)
+    doc.add_paragraph("👀 보드는 '뭘 해야 하는지'만 보여주는 안내판", style="List Bullet")
+    doc.add_paragraph("🛠️ 대시보드는 '실제로 작업하는 화면'", style="List Bullet")
+    doc.add_paragraph("→ 일을 하다가 다음 할 일을 까먹지 않습니다.", style="List Bullet")
+
+    doc.add_heading("두 화면 주소", level=2)
+    _t2 = doc.add_table(rows=3, cols=2); _t2.style = "Light Grid Accent 1"
+    _t2.cell(0,0).text = "위치"; _t2.cell(0,1).text = "주소"
+    _t2.cell(1,0).text = "왼쪽 (보드)"; _t2.cell(1,1).text = "https://shina-dashboard.streamlit.app/?mode=board"
+    _t2.cell(2,0).text = "오른쪽 (대시보드)"; _t2.cell(2,1).text = "https://shina-dashboard.streamlit.app/"
+    doc.add_paragraph("⭐ 즐겨찾기에 두 개를 등록해두면 매일 클릭 두 번으로 끝납니다.")
+
+    doc.add_page_break()
+
+    # ── 3장 ──
+    doc.add_heading("3장. 매일 아침 출근하면 이 순서대로", level=1)
+    doc.add_paragraph("이 시스템은 하루 일과를 자동으로 4단계로 나눠 줍니다. 위에서 아래로 차근차근 처리하세요.")
+
+    _stages = [
+        ("1단계", "🌅 송장출력전 업무",
+         "출근 직후 (보통 8:00~10:00). 어제 가격 수정한 상품을 경쟁사가 또 가격을 내렸는지 체크하고, "
+         "1위를 빼앗긴 키워드를 회복하고, 경쟁사 워치 알림을 확인하고, 부진재고 1건을 정비합니다."),
+        ("2단계", "📦 송장출력",
+         "보통 10시쯤. OneWMS에 들어가서 송장을 출력합니다. 출력이 끝나면 자동으로 3단계가 활성화됩니다."),
+        ("3단계", "🎯 송장출력후 업무",
+         "송장 출력 후 ~ 17:00. 실제 매출 데이터를 보고 긴급 대응(이상 징후), 추가 확인, 7일 결과 갱신, "
+         "미완료 업무를 차례로 처리합니다. 이 시간이 가장 핵심입니다."),
+        ("4단계", "🌙 마감점검 및 대응",
+         "17:00~18:00. 18시 큐 알림 검토, 오늘 대응률 점검, 내일 prep 업무. 마감 직전 점검입니다."),
+    ]
+    for stg, ttl, desc in _stages:
+        _h = doc.add_heading(f"{stg}: {ttl}", level=2)
+        doc.add_paragraph(desc)
+
+    doc.add_paragraph("\n💡 한 단계가 끝나야 다음 단계가 활성화됩니다. 순서를 건너뛰지 마세요.")
+
+    doc.add_page_break()
+
+    # ── 4장 ──
+    doc.add_heading("4장. 화면별 기능 한눈에 보기", level=1)
+
+    doc.add_heading("🎯 오늘 할일 보드 (왼쪽)", level=2)
+    _b1 = doc.add_table(rows=5, cols=2); _b1.style = "Light Grid Accent 1"
+    _b1.cell(0,0).text = "영역"; _b1.cell(0,1).text = "설명"
+    _b1.cell(1,0).text = "상단 NOW 카드 (노란색)"; _b1.cell(1,1).text = "지금 당장 해야 할 1순위 업무"
+    _b1.cell(2,0).text = "Stage 1~4 박스"; _b1.cell(2,1).text = "전체 흐름. 활성화된 박스에 파란 테두리"
+    _b1.cell(3,0).text = "✅ 완료 / ⏭ 건너뛰기 / ⏰ 1시간 스누즈"; _b1.cell(3,1).text = "처리 후 누르는 버튼 3종"
+    _b1.cell(4,0).text = "📜 오늘 처리 로그"; _b1.cell(4,1).text = "오늘 끝낸 일 기록 (펼쳐 보기)"
+
+    doc.add_heading("🖥️ 메인 대시보드 (오른쪽) 핵심 페이지", level=2)
+    _b2 = doc.add_table(rows=8, cols=2); _b2.style = "Light Grid Accent 1"
+    _b2.cell(0,0).text = "메뉴"; _b2.cell(0,1).text = "용도"
+    _b2.cell(1,0).text = "📊 대시보드"; _b2.cell(1,1).text = "오늘 매출/재고/대응률 한눈에"
+    _b2.cell(2,0).text = "📦 판매·재고"; _b2.cell(2,1).text = "상품별 판매·재고 표"
+    _b2.cell(3,0).text = "💰 가격 모니터"; _b2.cell(3,1).text = "경쟁사와 가격 비교 + 수정"
+    _b2.cell(4,0).text = "👀 경쟁사 워치"; _b2.cell(4,1).text = "지정한 경쟁사가 가격 바꾸면 알림"
+    _b2.cell(5,0).text = "📝 업무일지"; _b2.cell(5,1).text = "오늘 한 일 기록 + 원인-대응 분석"
+    _b2.cell(6,0).text = "🔥 부진재고"; _b2.cell(6,1).text = "안 팔리는 상품 정비 대상"
+    _b2.cell(7,0).text = "📌 핀 SKU"; _b2.cell(7,1).text = "특별 관리 상품 모음"
+
+    doc.add_page_break()
+
+    # ── 5장 ──
+    doc.add_heading("5장. 자주 쓰는 버튼 설명", level=1)
+    _btns = [
+        ("✅ 완료", "그 일을 다 했을 때. 다음 1순위로 자동 넘어갑니다."),
+        ("⏭ 건너뛰기", "오늘 못 하거나 안 해도 될 때. 사유를 짧게 적어주세요. (예: '내일 처리')"),
+        ("⏰ 1시간 스누즈", "지금 못 하지만 1시간 뒤에 다시 떠올려야 할 때."),
+        ("🔄 새로고침", "데이터가 안 보이거나 이상할 때. 한 번 누르면 최신 상태로."),
+        ("🎯 오늘 할일 보드 (새 탭)", "메인 대시보드 사이드바에 있음. 보드 화면을 새 탭으로 엽니다."),
+    ]
+    for nm, desc in _btns:
+        p = doc.add_paragraph(); p.add_run(nm + " — ").bold = True; p.add_run(desc)
+
+    doc.add_page_break()
+
+    # ── 6장 ──
+    doc.add_heading("6장. 자주 묻는 질문 (Q&A)", level=1)
+    _qas = [
+        ("Q1. 보드에 '해당 없음 (자동 스킵)'이 떠요. 잘못된 건가요?",
+         "아닙니다. 그 항목에 처리할 게 없어서 시스템이 알아서 건너뛴 겁니다. 그냥 다음 항목으로 넘어가시면 됩니다."),
+        ("Q2. 1순위 업무를 안 하고 다른 거 먼저 하면 안 되나요?",
+         "급한 일이 있으면 ⏭ 건너뛰기 누르고 사유 적은 뒤 다른 일을 하셔도 됩니다. 단, 가급적 시스템 추천 순서를 지키는 게 좋습니다."),
+        ("Q3. Stage 2 송장출력은 어떻게 처리하나요?",
+         "OneWMS 사이트에서 실제로 송장을 출력하신 뒤, 보드의 ✅ 완료 버튼을 누르세요. 그러면 Stage 3가 자동 활성화됩니다."),
+        ("Q4. 보드와 대시보드 데이터가 다른 것 같아요.",
+         "보드 새로고침 (🔄) 누르세요. 그래도 다르면 메인 대시보드에서 [전체 새로고침] 누르고 1분 기다리세요."),
+        ("Q5. 어제 완료한 항목이 오늘 또 떠요.",
+         "정상입니다. 보드는 매일 아침 0시에 초기화됩니다. 어제 완료는 어제 기록으로 남아있습니다."),
+        ("Q6. 텔레그램 알림이 안 와요.",
+         "관리자에게 본인 텔레그램 ID 등록을 요청하세요."),
+        ("Q7. 가격 수정을 잘못했어요.",
+         "[가격 모니터] → [수정 이력] 탭에서 이전 가격 확인 후 다시 수정하세요. 모든 수정은 자동 기록됩니다."),
+    ]
+    for q, a in _qas:
+        p = doc.add_paragraph(); p.add_run(q).bold = True
+        doc.add_paragraph("→ " + a)
+
+    doc.add_page_break()
+
+    # ── 7장 ──
+    doc.add_heading("7장. 첫 1주일 체크리스트", level=1)
+    doc.add_paragraph("입사 후 1주일 동안 이것만 익히면 충분합니다.")
+    _wks = [
+        ("Day 1", "두 화면 즐겨찾기 등록 / 보드 ✅⏭⏰ 버튼 사용해 보기"),
+        ("Day 2", "메인 대시보드 [📊 대시보드] 페이지 숫자 의미 익히기"),
+        ("Day 3", "[📦 판매·재고] 페이지에서 SKU별 데이터 보기"),
+        ("Day 4", "[💰 가격 모니터]에서 경쟁사와 가격 비교 연습"),
+        ("Day 5", "[📝 업무일지]에 오늘 한 일 1건 기록해 보기"),
+        ("Day 6", "[👀 경쟁사 워치]에 관심 경쟁사 1곳 등록"),
+        ("Day 7", "선배에게 'Q&A에 없는 의문점' 1개 질문하기"),
+    ]
+    _ck = doc.add_table(rows=len(_wks)+1, cols=2); _ck.style = "Light Grid Accent 1"
+    _ck.cell(0,0).text = "날짜"; _ck.cell(0,1).text = "할 일"
+    for i, (d, t) in enumerate(_wks, 1):
+        _ck.cell(i,0).text = d; _ck.cell(i,1).text = t
+
+    doc.add_page_break()
+
+    # ── 8장 ──
+    doc.add_heading("8장. 문제가 생겼을 때", level=1)
+    _trbs = [
+        ("화면이 안 열려요", "1) 인터넷 확인 → 2) Ctrl+F5 강제 새로고침 → 3) 다른 브라우저 시도"),
+        ("로그인이 안 돼요", "초대 메일을 받은 Gmail 계정으로 접속하세요. 못 받았으면 관리자에게 요청."),
+        ("데이터가 안 보여요", "🔄 새로고침 → 1분 대기. 그래도 안 보이면 [전체 새로고침] 버튼."),
+        ("실수로 ✅ 완료 눌렀어요", "보드 하단 [📜 오늘 처리 로그] 펼쳐서 확인. 다음 날 자동 초기화되니 큰 문제 없음."),
+        ("화면이 깨져 보여요", "브라우저 줌 100%로 (Ctrl+0). 모니터 크기는 1920x1080 FHD 권장."),
+        ("그래도 안 되면", "관리자(soncb77@gmail.com)에게 화면 스크린샷과 함께 문의."),
+    ]
+    for nm, desc in _trbs:
+        p = doc.add_paragraph(); p.add_run("⚠ " + nm).bold = True
+        doc.add_paragraph("   " + desc)
+
+    # ── 마지막 ──
+    doc.add_paragraph("\n\n")
+    _end = doc.add_paragraph()
+    _end.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    _er = _end.add_run("— 끝 —\n신아인터네셔날 업무활용 매뉴얼 V1.0")
+    _er.font.color.rgb = RGBColor(0x94, 0xa3, 0xb8)
+
+    buf = BytesIO()
+    doc.save(buf)
+    return buf.getvalue()
+
+
+# ═════════════════════════════════════════════
 # 🎯 BOARD MODE — ?mode=board (좌측 모니터용 분리 화면)
 # ═════════════════════════════════════════════
 def _render_board_mode():
@@ -4684,6 +4909,19 @@ def _render_board_mode():
 
     st.caption(f"📌 우측 모니터에 메인 앱(작업 화면), 좌측에 이 보드 화면을 띄워 사용하세요. URL 끝에 `?mode=board`")
 
+    # 매뉴얼 다운로드 (신입사원용)
+    try:
+        _manual_bytes = generate_manual_docx()
+        st.download_button(
+            label="📘 사용 매뉴얼 V1.0 다운로드 (신입사원용)",
+            data=_manual_bytes,
+            file_name="신아인터네셔날_업무활용_매뉴얼_V1.0.docx",
+            mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            key="manual_dl_board",
+        )
+    except Exception:
+        pass
+
 
 # URL 파라미터로 보드 모드 진입
 try:
@@ -4707,6 +4945,22 @@ with st.sidebar:
         "font-size:0.85rem;margin:0.4rem 0;'>🎯 오늘 할일 보드 (새 탭)</a>",
         unsafe_allow_html=True,
     )
+
+    # ── 📘 사용 매뉴얼 V1.0 다운로드 ──
+    try:
+        _manual_bytes = generate_manual_docx()
+        st.download_button(
+            label="📘 사용 매뉴얼 V1.0 다운로드",
+            data=_manual_bytes,
+            file_name="신아인터네셔날_업무활용_매뉴얼_V1.0.docx",
+            mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            use_container_width=True,
+            key="manual_dl_sidebar",
+            help="신입사원용 친절한 매뉴얼 (Word 파일)",
+        )
+    except Exception as _e:
+        st.caption(f"📘 매뉴얼 생성 실패: {_e}")
+
     st.markdown("---")
 
     # ── 🔎 명령 팔레트 (U-4) ──
