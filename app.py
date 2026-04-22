@@ -719,6 +719,7 @@ WEEKLY_REPORT_FILE  = os.path.join(DATA_DIR, "weekly_report_state.json")
 COSTS_FILE          = os.path.join(DATA_DIR, "costs.json")  # D-2: SKU별 원가
 WATCHES_FILE        = os.path.join(DATA_DIR, "competitor_watches.json")  # D-4: 경쟁사 워치
 WATCH_STATE_FILE    = os.path.join(DATA_DIR, "competitor_watch_state.json")  # D-4: 마지막 체크 시간
+BOARD_STATE_FILE    = os.path.join(DATA_DIR, "board_state.json")  # B-1: 일일 업무 보드 상태
 
 # ─────────────────────────────────────────────
 # 플랫폼 관리
@@ -1445,6 +1446,277 @@ def maybe_check_watches(min_interval_minutes: int = 60) -> int:
     state["last_run"] = now.isoformat()
     save_json(WATCH_STATE_FILE, state)
     return sent
+
+
+# ─────────────────────────────────────────────
+# 일일 업무 보드 (B-1) — Stage 1~4 자동 우선순위
+# ─────────────────────────────────────────────
+def _board_today_key() -> str:
+    return datetime.now(KST).strftime("%Y-%m-%d")
+
+def load_board_state() -> dict:
+    """오늘자 보드 상태 (다른 날짜면 초기화)."""
+    today = _board_today_key()
+    data = load_json(BOARD_STATE_FILE, {"date": today, "completed": {}, "skipped": {}, "snoozed": {}, "logs": []})
+    if data.get("date") != today:
+        # 어제 데이터 보존하지 않고 초기화 (logs는 누적)
+        _logs = data.get("logs", [])
+        # 누적 로그 별도 파일은 만들지 않고 마지막 30건만 보존
+        data = {"date": today, "completed": {}, "skipped": {}, "snoozed": {}, "logs": _logs[-30:]}
+        save_json(BOARD_STATE_FILE, data)
+    return data
+
+def _save_board_state(state: dict):
+    save_json(BOARD_STATE_FILE, state)
+
+def board_mark(item_id: str, action: str, reason: str = ""):
+    """action: 'done' / 'skip' / 'snooze'."""
+    state = load_board_state()
+    now = datetime.now(KST).isoformat()
+    if action == "done":
+        state["completed"][item_id] = now
+    elif action == "skip":
+        state["skipped"][item_id] = {"at": now, "reason": reason or "사유 없음"}
+    elif action == "snooze":
+        # 1시간 뒤 재노출
+        wake = (datetime.now(KST) + timedelta(hours=1)).isoformat()
+        state["snoozed"][item_id] = wake
+    state["logs"].append({"id": item_id, "action": action, "at": now, "reason": reason})
+    _save_board_state(state)
+
+def _is_active(item_id: str, state: dict) -> bool:
+    """완료/스킵된 항목은 비활성. snooze 시간 안 됐으면 비활성."""
+    if item_id in state.get("completed", {}):
+        return False
+    if item_id in state.get("skipped", {}):
+        return False
+    snz = state.get("snoozed", {}).get(item_id)
+    if snz:
+        try:
+            if datetime.now(KST) < datetime.fromisoformat(snz):
+                return False
+        except Exception:
+            pass
+    return True
+
+def _yesterday_str() -> str:
+    return (datetime.now(KST) - timedelta(days=1)).strftime("%Y-%m-%d")
+
+def compute_board_items() -> list:
+    """4 스테이지 × 우선순위 항목 목록.
+    각 스테이지: {stage, title, time_window, items: [{id, priority, icon, title, detail, count, action_page, action_label, why}]}
+    규칙은 데이터 신호 기반 (deterministic)."""
+    cases   = load_json(CASES_FILE, {"cases": []}).get("cases", [])
+    insight = fetch_sales_insight() if False else None  # 보드에서는 외부 API 비용 회피 — caller가 주입
+    # caller가 _sig, insight_data를 미리 계산해서 전역에서 접근 가능하면 사용; 여기서는 신호만 필요한 부분 별도 계산
+    sig = compute_action_signals()
+
+    yest = _yesterday_str()
+    yest_pricecases = [c for c in cases if c.get("date","") == yest and c.get("action_type") == "price_change"]
+    pending_7d = sig.get("pending_7d", [])
+    today_pending = sig.get("today_pending", [])
+    queued = sig.get("queued_alerts", [])
+    rank_stolen = sig.get("rank_lost_stolen", [])
+
+    # 부진재고 1건 — pinned/cases 기반 후보 (간이: 첫 핀 SKU 또는 측정된 회복 실패 사례)
+    pinned = load_pinned_skus()
+    slow_candidate = pinned[0] if pinned else None
+
+    # 워치 알림 — 오늘 알림 발송된 워치
+    today = _board_today_key()
+    watches = load_watches()
+    watch_alerted_today = [w for w in watches if (w.get("last_alert") or "").startswith(today)]
+
+    stages = []
+
+    # ── Stage 1: 출근 정비 (08:00 ~ 송장 전) ──
+    s1_items = [
+        {
+            "id": "s1_p1_pricerecheck",
+            "icon": "🔥",
+            "title": "어제 가격수정 상품 — 경쟁사 재반격 체크",
+            "detail": f"{len(yest_pricecases)}건 — 어제 가격을 내린 상품을 가격모니터링에서 재검색해 1위 유지/경쟁사 재대응 여부 확인",
+            "count": len(yest_pricecases),
+            "action_page": "price_monitor",
+            "action_label": "가격 모니터링 열기",
+            "why": "어제 내가 내린 가격에 경쟁사가 같이 내렸으면 즉시 추가 대응. 안 하면 어제 한 일이 무효화됨.",
+            "skip_if_zero": True,
+        },
+        {
+            "id": "s1_p2_rankstolen",
+            "icon": "🥇",
+            "title": "1위 빼앗긴 키워드 회복 작업",
+            "detail": f"{len(rank_stolen)}건 — 과거 1위였으나 현재 밀린 키워드, 시나리오 권장가 적용 검토",
+            "count": len(rank_stolen),
+            "action_page": "price_monitor",
+            "action_label": "가격 모니터링 열기",
+            "why": "한 번 1위였던 키워드는 회복 가능성 높음. 노출·전환 직결.",
+            "skip_if_zero": True,
+        },
+        {
+            "id": "s1_p3_watchalerts",
+            "icon": "🚨",
+            "title": "경쟁사 워치 알림 결과 확인",
+            "detail": f"{len(watch_alerted_today)}건 — 오늘 워치 알림이 발송된 키워드 검토",
+            "count": len(watch_alerted_today),
+            "action_page": "competitor_watch",
+            "action_label": "경쟁사 워치 열기",
+            "why": "실시간 가격 변동을 워치가 감지했음. 사후 대응이 빠를수록 손실 적음.",
+            "skip_if_zero": True,
+        },
+        {
+            "id": "s1_p4_slowmoving",
+            "icon": "🐌",
+            "title": "부진재고 1건 정비 (페이지 리뉴얼 / 누락 판매처 / 가격)",
+            "detail": "오늘 1건만 처리 — 누적 효과를 노림",
+            "count": 1 if slow_candidate else 0,
+            "action_page": "slow_moving",
+            "action_label": "상품 재발굴 열기",
+            "why": "한 번에 다 못 함. 매일 1건씩만 처리하면 한 달에 20건 정비 가능.",
+            "skip_if_zero": False,
+        },
+    ]
+    stages.append({"stage": 1, "title": "🌅 출근 정비 (08:00~송장 전)",
+                   "time_window": (8, 10), "items": s1_items})
+
+    # ── Stage 2: 송장 (10:00 무렵) ──
+    s2_items = [
+        {
+            "id": "s2_invoice",
+            "icon": "📦",
+            "title": "송장 출력하러 가기 (OneWMS)",
+            "detail": "오전 판매 수집 + 송장 출력. 완료 후 Stage 3 자동 활성화.",
+            "count": 1,
+            "action_page": None,
+            "action_label": "✅ 출력 완료 표시",
+            "why": "송장 완료가 Stage 3의 트리거. 보통 10시쯤.",
+            "skip_if_zero": False,
+        }
+    ]
+    stages.append({"stage": 2, "title": "📦 송장 출력 (10:00 무렵)",
+                   "time_window": (10, 11), "items": s2_items})
+
+    # ── Stage 3: 본 게임 (송장 후 ~ 17:00) ──
+    insight_d = fetch_sales_insight()
+    anomalies = insight_d.get("anomalies", []) if insight_d.get("status") in ("분석 완료","송장 미출력") else []
+    watchlist = insight_d.get("watchlist", []) if insight_d.get("status") in ("분석 완료","송장 미출력") else []
+    today_shipped = insight_d.get("today_shipped", False)
+
+    s3_items = [
+        {
+            "id": "s3_p1_anomalies",
+            "icon": "🔴",
+            "title": "긴급 대응 — 매일 출고 → 오늘 0건",
+            "detail": f"{len(anomalies)}건 — 평소 매일 나가는 상품이 오늘 멈춤",
+            "count": len(anomalies) if today_shipped else 0,
+            "action_page": "sales_inventory",
+            "action_label": "판매 대응 열기",
+            "why": "매출 직격탄. 가장 큰 손실 가능성. 1순위 대응.",
+            "skip_if_zero": True,
+        },
+        {
+            "id": "s3_p2_watchlist",
+            "icon": "🟡",
+            "title": "추가 확인 — 간헐 출고 → 오늘 0건",
+            "detail": f"{len(watchlist)}건 — 평소 간헐적이지만 오늘 0",
+            "count": len(watchlist) if today_shipped else 0,
+            "action_page": "sales_inventory",
+            "action_label": "판매 대응 열기",
+            "why": "긴급보다는 낮지만 누적되면 손실. 긴급 처리 후 곧장.",
+            "skip_if_zero": True,
+        },
+        {
+            "id": "s3_p3_pending7d",
+            "icon": "⏰",
+            "title": "7일 결과 확인 필요 사례",
+            "detail": f"{len(pending_7d)}건 — 7일 경과 사례의 OneWMS 출고 결과 갱신",
+            "count": len(pending_7d),
+            "action_page": "daily_log",
+            "action_label": "업무일지 → 직원 성과",
+            "why": "매트릭스 학습 데이터 축적. P2-C 인사이트 정확도 직결.",
+            "skip_if_zero": True,
+        },
+        {
+            "id": "s3_p4_pending_tasks",
+            "icon": "📝",
+            "title": "오늘 미완료 업무 처리",
+            "detail": f"{len(today_pending)}건 — 업무일지에 등록된 미완료 항목",
+            "count": len(today_pending),
+            "action_page": "daily_log",
+            "action_label": "업무일지 열기",
+            "why": "이미 등록된 업무는 빠뜨리면 안 됨.",
+            "skip_if_zero": True,
+        },
+    ]
+    stages.append({"stage": 3, "title": "🎯 본 게임 (송장 후~17:00)",
+                   "time_window": (10, 17), "items": s3_items})
+
+    # ── Stage 4: 마감 (17:00~18:00) ──
+    s4_items = [
+        {
+            "id": "s4_p1_queue",
+            "icon": "🔔",
+            "title": "18시 일괄 알림 큐 검토",
+            "detail": f"{len(queued)}건 — 오늘 큐에 쌓인 알림 확인 후 18시 발송",
+            "count": len(queued),
+            "action_page": "daily_log",
+            "action_label": "업무일지 → 설정 탭",
+            "why": "잘못된 알림은 대표/거래처에게 노이즈. 한 번 거른 후 발송.",
+            "skip_if_zero": True,
+        },
+        {
+            "id": "s4_p2_rate",
+            "icon": "📊",
+            "title": "오늘 대응률 점검",
+            "detail": "대응률 80% 미만이면 사유 메모",
+            "count": 1,
+            "action_page": "daily_log",
+            "action_label": "업무일지 열기",
+            "why": "다음날 우선순위 학습의 기초.",
+            "skip_if_zero": False,
+        },
+        {
+            "id": "s4_p3_tomorrow",
+            "icon": "🌅",
+            "title": "내일 1순위 미리보기",
+            "detail": "내일 출근 직후 시작할 항목을 머릿속에 prep",
+            "count": 1,
+            "action_page": None,
+            "action_label": "✅ 확인 완료",
+            "why": "내일 아침 의사결정 비용 0으로 만듦.",
+            "skip_if_zero": False,
+        },
+    ]
+    stages.append({"stage": 4, "title": "🌙 마감 점검 (17:00~18:00)",
+                   "time_window": (17, 18), "items": s4_items})
+
+    return stages
+
+def get_current_stage(stages: list) -> int:
+    """현재 시간 + Stage 2 (송장) 완료 여부로 현재 활성 Stage 결정."""
+    state = load_board_state()
+    now_h = datetime.now(KST).hour
+    invoice_done = "s2_invoice" in state.get("completed", {})
+
+    if not invoice_done and now_h < 10:
+        return 1
+    if not invoice_done and 10 <= now_h < 12:
+        return 2
+    if invoice_done and now_h < 17:
+        return 3
+    if now_h >= 17:
+        return 4
+    return 3  # fallback
+
+def get_top_priority(stage_items: list, state: dict) -> dict | None:
+    """현재 Stage에서 활성(미완료/미스킵/미스누즈)인 첫 우선순위 항목."""
+    for it in stage_items:
+        # skip_if_zero: count=0이면서 skip_if_zero=True면 스킵
+        if it.get("skip_if_zero") and it.get("count", 0) == 0:
+            continue
+        if _is_active(it["id"], state):
+            return it
+    return None
 
 
 def get_global_period() -> tuple:
@@ -4216,9 +4488,225 @@ def _fetch_orders_range(start_date: str, end_date: str) -> list:
     return all_orders
 
 
+# ═════════════════════════════════════════════
+# 🎯 BOARD MODE — ?mode=board (좌측 모니터용 분리 화면)
+# ═════════════════════════════════════════════
+def _render_board_mode():
+    """별도 탭에서 띄우는 '오늘 할일' 보드. 사이드바/메뉴 숨기고 보드만."""
+    # 사이드바 숨김 + 컨테이너 폭 확장
+    st.markdown("""
+    <style>
+    [data-testid="stSidebar"] { display: none !important; }
+    [data-testid="collapsedControl"] { display: none !important; }
+    .block-container { max-width: 1400px !important; padding-top: 1rem !important; }
+    .board-stage-card {
+        background: #ffffff; border: 1px solid #e5e7eb; border-radius: 14px;
+        padding: 1.2rem 1.4rem; margin-bottom: 0.8rem;
+    }
+    .board-stage-card.active {
+        border: 2px solid #3b82f6; box-shadow: 0 4px 20px rgba(59,130,246,0.15);
+    }
+    .board-stage-card.locked, .board-stage-card.done {
+        opacity: 0.45; filter: grayscale(0.4);
+    }
+    .board-priority-now {
+        background: linear-gradient(135deg, #fef3c7, #fde68a);
+        border: 2px solid #f59e0b; border-radius: 12px;
+        padding: 1rem 1.2rem; margin-bottom: 0.6rem;
+    }
+    .board-priority-now .pn-tag {
+        display: inline-block; background: #f59e0b; color: white;
+        padding: 0.15rem 0.6rem; border-radius: 4px; font-size: 0.7rem; font-weight: 700;
+    }
+    .board-priority-now .pn-title { font-size: 1.25rem; font-weight: 800; color: #92400e; margin-top: 0.4rem; }
+    .board-priority-now .pn-detail { font-size: 0.88rem; color: #78350f; margin-top: 0.3rem; }
+    .board-priority-now .pn-why {
+        background: rgba(255,255,255,0.6); border-left: 3px solid #f59e0b;
+        padding: 0.4rem 0.7rem; border-radius: 4px; margin-top: 0.6rem;
+        font-size: 0.78rem; color: #78350f; font-style: italic;
+    }
+    .board-next-item {
+        background: #f8fafc; border: 1px solid #e5e7eb; border-radius: 8px;
+        padding: 0.6rem 0.9rem; margin-bottom: 0.35rem;
+        opacity: 0.55; filter: blur(0.3px);
+    }
+    .board-done-item {
+        background: #f0fdf4; border-left: 3px solid #16a34a; padding: 0.4rem 0.7rem;
+        margin-bottom: 0.25rem; border-radius: 4px; font-size: 0.78rem; color: #15803d;
+    }
+    .board-skip-item {
+        background: #fafaf9; border-left: 3px solid #94a3b8; padding: 0.4rem 0.7rem;
+        margin-bottom: 0.25rem; border-radius: 4px; font-size: 0.78rem; color: #64748b;
+    }
+    </style>
+    """, unsafe_allow_html=True)
+
+    _gist_restore_all()
+
+    stages = compute_board_items()
+    state  = load_board_state()
+    cur_stage = get_current_stage(stages)
+
+    # ── 헤더 ──
+    now = datetime.now(KST)
+    _all_items = [it for s in stages for it in s["items"]]
+    _done_n = sum(1 for it in _all_items if it["id"] in state.get("completed", {}))
+    _skip_n = sum(1 for it in _all_items if it["id"] in state.get("skipped", {}))
+    _total_n = len(_all_items)
+    _progress_pct = int((_done_n + _skip_n) / _total_n * 100) if _total_n else 0
+
+    _h1, _h2, _h3, _h4 = st.columns([3, 2, 2, 1])
+    _h1.markdown(f"### 🎯 오늘 할일 보드 — {now.strftime('%Y-%m-%d (%a) %H:%M')}")
+    _h2.metric("Stage", f"{cur_stage}/4", help=stages[cur_stage-1]["title"])
+    _h3.metric("진행", f"{_done_n + _skip_n}/{_total_n}", f"{_progress_pct}%")
+    if _h4.button("🔄", key="board_refresh", use_container_width=True, help="새로고침"):
+        st.rerun()
+
+    # 진행률 바
+    st.markdown(
+        f"<div style='background:#f1f5f9;height:8px;border-radius:4px;margin-bottom:1rem;overflow:hidden;'>"
+        f"<div style='background:linear-gradient(90deg,#3b82f6,#10b981);height:100%;width:{_progress_pct}%;transition:width 0.3s;'></div>"
+        f"</div>", unsafe_allow_html=True)
+
+    # ── 현재 Stage의 1순위 (HERO) ──
+    cur_stage_obj = stages[cur_stage - 1]
+    top = get_top_priority(cur_stage_obj["items"], state)
+
+    if top is None:
+        # 현재 Stage 모두 처리 완료
+        st.success(f"✅ Stage {cur_stage} 완료! 다음 단계로 진행하세요.")
+    else:
+        _action_url = ""
+        if top.get("action_page"):
+            _action_url = f"?page={top['action_page']}"
+        st.markdown(
+            f"<div class='board-priority-now'>"
+            f"<span class='pn-tag'>NOW · 1순위 · Stage {cur_stage}</span>"
+            f"<div class='pn-title'>{top['icon']} {top['title']}</div>"
+            f"<div class='pn-detail'>{top['detail']}</div>"
+            f"<div class='pn-why'>💡 {top['why']}</div>"
+            f"</div>", unsafe_allow_html=True)
+
+        _b1, _b2, _b3, _b4 = st.columns([1.2, 1, 1, 2])
+        if _b1.button("✅ 완료", key=f"done_{top['id']}", type="primary", use_container_width=True):
+            board_mark(top["id"], "done")
+            st.toast(f"✅ 완료: {top['title'][:20]}", icon="✅")
+            st.rerun()
+
+        with _b2:
+            _skip_reason = st.selectbox(
+                "스킵 사유", ["불필요", "시간없음", "타직원처리", "외부대기", "기타"],
+                key=f"skip_reason_{top['id']}", label_visibility="collapsed",
+            )
+        if _b3.button("⏭ 건너뛰기", key=f"skip_{top['id']}", use_container_width=True):
+            board_mark(top["id"], "skip", reason=_skip_reason)
+            st.toast(f"⏭ 스킵: {_skip_reason}", icon="⏭️")
+            st.rerun()
+        if _b4.button("⏰ 1시간 뒤 다시 (스누즈)", key=f"snz_{top['id']}", use_container_width=True):
+            board_mark(top["id"], "snooze")
+            st.toast(f"⏰ 1시간 뒤 재노출", icon="⏰")
+            st.rerun()
+
+    st.markdown("---")
+
+    # ── 4개 Stage 카드 ──
+    for s in stages:
+        sn = s["stage"]
+        is_active = sn == cur_stage
+        # done = 모든 active 항목 처리됨
+        _stage_active_items = [it for it in s["items"]
+                               if not (it.get("skip_if_zero") and it.get("count",0) == 0)]
+        _stage_done = all((it["id"] in state.get("completed", {}) or it["id"] in state.get("skipped", {}))
+                         for it in _stage_active_items) if _stage_active_items else True
+        _cls = "active" if is_active else ("done" if _stage_done else "locked")
+
+        with st.container():
+            st.markdown(f"<div class='board-stage-card {_cls}'>", unsafe_allow_html=True)
+            _t1, _t2 = st.columns([4, 1])
+            _t1.markdown(f"#### {s['title']}")
+            _stage_total = len(_stage_active_items)
+            _stage_done_n = sum(1 for it in _stage_active_items
+                              if it["id"] in state.get("completed", {}) or it["id"] in state.get("skipped", {}))
+            _t2.markdown(f"<div style='text-align:right;font-size:0.85rem;color:#64748b;padding-top:0.5rem;'>{_stage_done_n}/{_stage_total}</div>", unsafe_allow_html=True)
+
+            # 항목 리스트
+            for it in s["items"]:
+                _id = it["id"]
+                _is_done = _id in state.get("completed", {})
+                _is_skip = _id in state.get("skipped", {})
+                _is_zero_skip = it.get("skip_if_zero") and it.get("count",0) == 0
+                _is_top = (top is not None and _id == top["id"] and is_active)
+
+                if _is_zero_skip:
+                    st.markdown(
+                        f"<div class='board-skip-item'>{it['icon']} {it['title']} — <span style='color:#94a3b8;'>해당 없음 (자동 스킵)</span></div>",
+                        unsafe_allow_html=True)
+                elif _is_done:
+                    _t = state["completed"][_id]
+                    try:
+                        _ts = datetime.fromisoformat(_t).strftime("%H:%M")
+                    except Exception:
+                        _ts = ""
+                    st.markdown(
+                        f"<div class='board-done-item'>✅ {it['icon']} {it['title']} <span style='float:right;'>{_ts}</span></div>",
+                        unsafe_allow_html=True)
+                elif _is_skip:
+                    _r = state["skipped"][_id].get("reason", "")
+                    st.markdown(
+                        f"<div class='board-skip-item'>⏭ {it['icon']} {it['title']} — <span style='color:#94a3b8;'>스킵 ({_r})</span></div>",
+                        unsafe_allow_html=True)
+                elif _is_top:
+                    # 이미 위 HERO에 표시됨
+                    st.markdown(
+                        f"<div style='background:#fffbeb;border:1px dashed #f59e0b;border-radius:6px;padding:0.4rem 0.7rem;margin-bottom:0.25rem;font-size:0.78rem;color:#92400e;'>👆 위 NOW 카드에 표시됨 ({it['icon']} {it['title']})</div>",
+                        unsafe_allow_html=True)
+                else:
+                    _opacity = "0.45" if not is_active else "0.75"
+                    st.markdown(
+                        f"<div class='board-next-item' style='opacity:{_opacity};'>"
+                        f"<strong>{it['icon']} {it['title']}</strong> "
+                        f"<span style='color:#64748b;font-size:0.72rem;'>· {it['detail'][:60]}</span>"
+                        f"</div>", unsafe_allow_html=True)
+
+            st.markdown("</div>", unsafe_allow_html=True)
+
+    # ── 하단: 오늘 로그 ──
+    with st.expander("📜 오늘 처리 로그", expanded=False):
+        _logs = state.get("logs", [])
+        if not _logs:
+            st.caption("아직 처리한 항목 없음")
+        else:
+            for l in reversed(_logs[-20:]):
+                _ts = l.get("at", "")[-8:][:5]
+                _act = {"done":"✅","skip":"⏭","snooze":"⏰"}.get(l.get("action",""), "·")
+                _r = f" ({l.get('reason','')})" if l.get("reason") else ""
+                st.caption(f"{_ts} {_act} {l.get('id','')}{_r}")
+
+    st.caption(f"📌 우측 모니터에 메인 앱(작업 화면), 좌측에 이 보드 화면을 띄워 사용하세요. URL 끝에 `?mode=board`")
+
+
+# URL 파라미터로 보드 모드 진입
+try:
+    _qp_mode = st.query_params.get("mode", "")
+except Exception:
+    _qp_mode = ""
+
+if _qp_mode == "board":
+    _render_board_mode()
+    st.stop()
+
+
 with st.sidebar:
     st.markdown('<div style="display:flex;align-items:center;margin-bottom:0.3rem;"><div class="sidebar-logo"><div class="kb-text">KINI<br>BINI</div><div class="kb-sub">Premium</div></div><span style="font-size:1.3rem;font-weight:800;">신아인터네셔날</span></div>', unsafe_allow_html=True)
     st.caption("ShinA International 업무 대시보드")
+
+    # ── 🎯 오늘 할일 보드 (별도 탭) ──
+    st.markdown(
+        "<a href='?mode=board' target='_blank' style='display:block;background:linear-gradient(135deg,#3b82f6,#1d4ed8);"
+        "color:white;text-decoration:none;text-align:center;padding:0.5rem;border-radius:8px;font-weight:700;"
+        "font-size:0.85rem;margin:0.4rem 0;'>🎯 오늘 할일 보드 (새 탭)</a>",
+        unsafe_allow_html=True,
+    )
     st.markdown("---")
 
     # ── 🔎 명령 팔레트 (U-4) ──
