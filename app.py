@@ -177,6 +177,63 @@ st.markdown("""
     .kpi-card .sub { font-size: 0.58rem; opacity: 0.5; margin-top: 0.05rem; }
     .kpi-card.pending .value { opacity: 0.35; font-size: 0.85rem; }
 
+    /* ── HERO 카드 (대시보드 상단 큰 숫자) ── */
+    .hero-card {
+        padding: 1.2rem 1.4rem;
+        border-radius: 14px;
+        border: 1px solid rgba(128,128,128,0.15);
+        background: linear-gradient(135deg, var(--hero-bg-1, #f8fafc), var(--hero-bg-2, #eef2ff));
+        position: relative;
+        overflow: hidden;
+        min-height: 130px;
+    }
+    .hero-card .hero-label {
+        font-size: 0.78rem; color: #64748b; font-weight: 600;
+        text-transform: uppercase; letter-spacing: 0.04em;
+    }
+    .hero-card .hero-value {
+        font-size: 2.4rem; font-weight: 900; line-height: 1.1;
+        margin-top: 0.4rem; color: var(--hero-color, #0f172a);
+    }
+    .hero-card .hero-delta {
+        font-size: 0.95rem; font-weight: 700; margin-top: 0.3rem;
+    }
+    .hero-card .hero-sub {
+        font-size: 0.72rem; color: #64748b; margin-top: 0.2rem;
+    }
+    .hero-card .hero-icon {
+        position: absolute; top: 0.9rem; right: 1rem;
+        font-size: 2rem; opacity: 0.18;
+    }
+
+    /* ── 컴팩트 카드 (사이드 섹션) ── */
+    .compact-card {
+        padding: 0.7rem 0.9rem;
+        border-radius: 10px;
+        background: #ffffff;
+        border: 1px solid #e5e7eb;
+        margin-bottom: 0.5rem;
+    }
+    .compact-card .cc-title {
+        font-size: 0.78rem; font-weight: 700; color: #334155;
+        margin-bottom: 0.35rem; display: flex; justify-content: space-between;
+    }
+    .compact-card .cc-row {
+        font-size: 0.78rem; color: #475569; padding: 0.15rem 0;
+        display: flex; justify-content: space-between; align-items: center;
+        border-top: 1px dashed #f1f5f9;
+    }
+    .compact-card .cc-row:first-of-type { border-top: none; }
+
+    /* ── 핀 SKU 슬림 ── */
+    .pin-slim {
+        background: #fffbf0; border: 1px solid #ffe0b2; border-radius: 8px;
+        padding: 0.45rem 0.6rem; text-align: center;
+    }
+    .pin-slim .ps-name { font-size: 0.78rem; font-weight: 700; color: #1e293b; }
+    .pin-slim .ps-info { font-size: 0.68rem; color: #64748b; margin-top: 0.1rem; }
+    .pin-slim .ps-diff { font-size: 0.7rem; font-weight: 700; margin-top: 0.1rem; }
+
     /* ── 섹션 헤더 (슬림) ── */
     .section-title {
         display: flex;
@@ -5296,134 +5353,30 @@ if _pending_price:
 # 📊 대시보드 (메인 요약 페이지)
 # ─────────────────────────────────────────────
 if current_page == "dashboard":
-    # ── 📅 현재 분석 기간 표시 (U-3) ──
-    _g_start, _g_end, _g_label = get_global_period()
-    st.caption(f"📅 현재 분석 기간: **{_g_label}** ({_g_start} ~ {_g_end}) — 사이드바에서 변경")
+    # ════════════════════════════════════════════════════════
+    # 📊 Glance Dashboard (1920×1080 1-screen 리디자인)
+    # ════════════════════════════════════════════════════════
 
-    # ── 🚦 Action Inbox (홈 관제탑) ──
-    _sig = compute_action_signals()
-    if _sig["total"] > 0 or _sig["queued_alerts"]:
-        st.markdown('<div class="section-title"><span class="icon">🚦</span> Action Inbox — 지금 처리 필요</div>', unsafe_allow_html=True)
-        _inbox_cols = st.columns(4)
-        with _inbox_cols[0]:
-            n = len(_sig["rank_lost"])
-            color = "#ef5350" if n > 0 else "#bdbdbd"
-            st.markdown(f'<div style="background:linear-gradient(135deg,#fff5f5,#ffe8e8);border:1px solid #ffcdd2;border-radius:10px;padding:0.6rem;text-align:center;"><div style="font-size:0.7rem;color:#666;">📉 1위 빼앗긴 키워드</div><div style="font-size:1.4rem;font-weight:800;color:{color};">{n}</div><div style="font-size:0.65rem;color:#888;">가격 모니터링 탭</div></div>', unsafe_allow_html=True)
-        with _inbox_cols[1]:
-            n = len(_sig["today_pending"])
-            color = "#e65100" if n > 0 else "#bdbdbd"
-            st.markdown(f'<div style="background:linear-gradient(135deg,#fffbf0,#fff3e0);border:1px solid #ffe0b2;border-radius:10px;padding:0.6rem;text-align:center;"><div style="font-size:0.7rem;color:#666;">📝 오늘 미완료 업무</div><div style="font-size:1.4rem;font-weight:800;color:{color};">{n}</div><div style="font-size:0.65rem;color:#888;">업무 일지 탭</div></div>', unsafe_allow_html=True)
-        with _inbox_cols[2]:
-            n = len(_sig["pending_7d"])
-            color = "#5e35b1" if n > 0 else "#bdbdbd"
-            st.markdown(f'<div style="background:linear-gradient(135deg,#f3f0ff,#ede7f6);border:1px solid #d1c4e9;border-radius:10px;padding:0.6rem;text-align:center;"><div style="font-size:0.7rem;color:#666;">⏰ 7일 결과 확인</div><div style="font-size:1.4rem;font-weight:800;color:{color};">{n}</div><div style="font-size:0.65rem;color:#888;">사례 DB</div></div>', unsafe_allow_html=True)
-        with _inbox_cols[3]:
-            n = len(_sig["queued_alerts"])
-            color = "#1565c0" if n > 0 else "#bdbdbd"
-            st.markdown(f'<div style="background:linear-gradient(135deg,#f0f7ff,#e3f2fd);border:1px solid #bbdefb;border-radius:10px;padding:0.6rem;text-align:center;"><div style="font-size:0.7rem;color:#666;">🔔 오늘 큐 알림</div><div style="font-size:1.4rem;font-weight:800;color:{color};">{n}</div><div style="font-size:0.65rem;color:#888;">18시 일괄 발송</div></div>', unsafe_allow_html=True)
-
-        with st.expander("📋 처리 항목 상세 보기", expanded=False):
-            if _sig["rank_lost"]:
-                st.markdown("**📉 1위 빼앗긴 키워드 (최근 스냅샷 기준)**")
-                for r in _sig["rank_lost"][:10]:
-                    _diff = r["our_price"] - r["top1_price"]
-                    st.markdown(f'- `{r["keyword"]}` — 우리 {r["our_rank"]}위 {r["our_price"]:,}원 / 1위 {r["top1_price"]:,}원 (+{_diff:,}원) · {r["date"]}')
-            if _sig["today_pending"]:
-                st.markdown("**📝 오늘 미완료 업무**")
-                for t in _sig["today_pending"][:10]:
-                    st.markdown(f'- {t.get("title","(제목없음)")}')
-            if _sig["pending_7d"]:
-                st.markdown("**⏰ 7일 결과 확인 필요 사례**")
-                for c in _sig["pending_7d"][:10]:
-                    st.markdown(f'- {c.get("date","")} · {c.get("product_name","")} ({c.get("action_label","")})')
-        st.markdown("")
-
-    # ── 📌 핀 SKU (U-4) ──
-    _pinned = load_pinned_skus()
-    if _pinned:
-        st.markdown('<div class="section-title"><span class="icon">📌</span> 즐겨찾기 SKU</div>', unsafe_allow_html=True)
-        _pin_cols = st.columns(min(len(_pinned), 5))
-        for i, p in enumerate(_pinned[:5]):
-            with _pin_cols[i]:
-                _kw = p.get("keyword","")
-                _nm = p.get("name") or _kw
-                # 가장 최근 스냅샷 가져오기
-                _hist = get_price_history(_kw, days=30)
-                _last = _hist[-1] if _hist else None
-                if _last:
-                    _our = _last.get("our", [])
-                    _our_p = _our[0]["price"] if _our else None
-                    _our_r = _our[0]["rank"] if _our else None
-                    _t1 = _last.get("top1", {}).get("price", 0)
-                    _diff_html = ""
-                    if _our_p and _t1:
-                        _d = _our_p - _t1
-                        _color = "#ef5350" if _d > 0 else "#2e7d32"
-                        _diff_html = f'<div style="font-size:0.72rem;color:{_color};">vs 1위 {_d:+,}원</div>'
-                    _content = f'<div style="font-size:0.95rem;font-weight:700;">{_nm[:14]}</div>'
-                    _content += f'<div style="font-size:0.7rem;color:#666;">우리 {_our_r}위 · {_our_p:,}원</div>' if _our_r else '<div style="font-size:0.7rem;color:#999;">우리매장 미발견</div>'
-                    _content += _diff_html
-                else:
-                    _content = f'<div style="font-size:0.95rem;font-weight:700;">{_nm[:14]}</div><div style="font-size:0.7rem;color:#999;">스냅샷 없음</div>'
-                st.markdown(f'<div style="background:#fffbf0;border:1px solid #ffe0b2;border-radius:10px;padding:0.6rem;text-align:center;">{_content}</div>', unsafe_allow_html=True)
-                if st.button("🔍 열기", key=f"_pin_open_{i}", width="stretch"):
-                    st.session_state.current_page = "price_monitor"
-                    st.session_state["_auto_price_keyword"] = _kw
-                    st.session_state["active_keyword"] = _kw
-                    st.rerun()
-
-    # CEO 지시 사항
-    ceo_data = load_json(CEO_MSG_FILE, {"message": "", "updated": ""})
-    if ceo_data.get("message"):
-        st.markdown(f"""
-        <div class="ceo-strategy-box">
-            <div class="badge">CEO STRATEGY</div>
-            <h3>📋 오늘의 전략</h3>
-            <div class="content">{ceo_data['message'].replace(chr(10), '<br>')}</div>
-            <div class="meta">최종 수정: {ceo_data.get('updated', '-')}</div>
-        </div>
-        """, unsafe_allow_html=True)
-
-    with st.expander("✏️ CEO 지시사항 수정 (관리자 전용)", expanded=False):
-        new_msg = st.text_area(
-            "오늘의 전략 / 지시사항",
-            value=ceo_data.get("message", ""),
-            height=100,
-            placeholder="직원들에게 전달할 오늘의 전략을 입력하세요...",
-        )
-        if st.button("💾 지시사항 저장", type="primary", width="stretch"):
-            ceo_data = {
-                "message": new_msg,
-                "updated": datetime.now(KST).strftime("%Y-%m-%d %H:%M"),
-            }
-            save_json(CEO_MSG_FILE, ceo_data)
-            st.success("저장되었습니다!")
-            st.rerun()
-
-    # ── 오늘 요약 KPI ── (병렬 로딩)
-    st.markdown('<div class="section-title"><span class="icon">📊</span> 오늘 현황 요약</div>', unsafe_allow_html=True)
-
-    # 대시보드 데이터 로딩 (세션 캐시로 rerun 최적화)
+    # ── 데이터 일괄 로딩 (10분 세션 캐시) ──
     _dash_cache_key = "_dash_parallel_cache"
-    _dash_cache_ts = "_dash_parallel_ts"
-    _dash_ttl = 600  # 10분
+    _dash_cache_ts  = "_dash_parallel_ts"
+    _dash_ttl       = 600
     _use_dash_cache = (
         _dash_cache_key in st.session_state
         and _dash_cache_ts in st.session_state
         and (datetime.now(KST) - st.session_state[_dash_cache_ts]).total_seconds() < _dash_ttl
     )
     if _use_dash_cache:
-        sales_data = st.session_state[_dash_cache_key]["sales"]
+        sales_data     = st.session_state[_dash_cache_key]["sales"]
         inventory_data = st.session_state[_dash_cache_key]["inventory"]
-        product_names = st.session_state[_dash_cache_key]["products"]
-        insight_data = st.session_state[_dash_cache_key]["insight"]
+        product_names  = st.session_state[_dash_cache_key]["products"]
+        insight_data   = st.session_state[_dash_cache_key]["insight"]
     else:
         with st.spinner("📡 데이터 불러오는 중..."):
-            sales_data = fetch_yesterday_sales()
+            sales_data     = fetch_yesterday_sales()
             inventory_data = fetch_current_inventory()
-            product_names = fetch_product_names()
-            insight_data = fetch_sales_insight()
-        # 세션 캐시에 저장 (rerun 시 API 재호출 방지)
+            product_names  = fetch_product_names()
+            insight_data   = fetch_sales_insight()
         st.session_state[_dash_cache_key] = {
             "sales": sales_data, "inventory": inventory_data,
             "products": product_names, "insight": insight_data,
@@ -5431,212 +5384,336 @@ if current_page == "dashboard":
         st.session_state[_dash_cache_ts] = datetime.now(KST)
 
     sales_connected = sales_data["status"] == "연동 완료"
-    inv_connected = inventory_data["status"] == "연동 완료"
-    sales_error = "오류" in sales_data.get("status", "")
+    inv_connected   = inventory_data["status"] == "연동 완료"
+    sales_error     = "오류" in sales_data.get("status", "")
 
-    # 매출 KPI (독립)
+    _g_start, _g_end, _g_label = get_global_period()
+    _sig            = compute_action_signals()
+    _pinned         = load_pinned_skus()
+    _ceo_data       = load_json(CEO_MSG_FILE, {"message": "", "updated": ""})
+    _dash_today_str = today.strftime("%Y-%m-%d")
+    _dash_tasks     = load_json(TASKS_FILE, {"tasks": []}).get("tasks", [])
+    _dash_today_actions = [t for t in _dash_tasks if t.get("due") == _dash_today_str and t.get("action")]
+    _dash_today_total   = [t for t in _dash_tasks if t.get("due") == _dash_today_str]
+    _dash_done_count    = sum(1 for t in _dash_today_total if t.get("done"))
+    _dash_rate          = round(_dash_done_count / len(_dash_today_total) * 100) if _dash_today_total else 0
+
+    # 헤더 캡션 (분석 기간 + 마지막 갱신)
+    _last_refresh = st.session_state[_dash_cache_ts].strftime("%H:%M")
+    _hc1, _hc2 = st.columns([6, 1])
+    _hc1.caption(f"📅 분석 기간: **{_g_label}** ({_g_start} ~ {_g_end}) · 마지막 갱신 {_last_refresh}")
+    if _hc2.button("🔄 새로고침", key="_dash_refresh", use_container_width=True):
+        st.session_state.pop(_dash_cache_key, None)
+        st.session_state.pop(_dash_cache_ts, None)
+        st.rerun()
+
+    # ════════════════════════════════════════════════════════
+    # ROW 1 — HERO (3 큰 숫자)
+    # ════════════════════════════════════════════════════════
     if sales_connected:
-        sales_diff = sales_data["total_sales"] - sales_data.get("prev_sales", 0)
-        count_diff = sales_data["order_count"] - sales_data.get("prev_count", 0)
-        sales_diff_text = f"{'▲' if sales_diff >= 0 else '▼'} {format_won(abs(sales_diff))}" if sales_data.get("prev_sales") else "전일 대비"
-        count_diff_text = f"{'▲' if count_diff >= 0 else '▼'} {abs(count_diff)}건" if sales_data.get("prev_count") is not None else "전일 대비"
-        sales_kpi = [
-            {"icon": "💰", "label": "어제 총 매출", "value": format_won(sales_data['total_sales']), "sub": sales_diff_text},
-            {"icon": "📦", "label": "어제 주문 건수", "value": f"{sales_data['order_count']}건", "sub": count_diff_text},
-        ]
+        _sales_diff = sales_data["total_sales"] - sales_data.get("prev_sales", 0)
+        _sd_color = "#16a34a" if _sales_diff >= 0 else "#dc2626"
+        _sd_arrow = "▲" if _sales_diff >= 0 else "▼"
+        _sales_val = format_won(sales_data['total_sales'])
+        _sales_delta = f"<span style='color:{_sd_color};'>{_sd_arrow} {format_won(abs(_sales_diff))}</span>" if sales_data.get("prev_sales") else "<span style='color:#94a3b8;'>전일 데이터 없음</span>"
+        _sales_sub = f"주문 {sales_data['order_count']}건"
     else:
-        sales_kpi = [
-            {"icon": "💰", "label": "어제 총 매출", "value": "—", "sub": "API 미연동"},
-            {"icon": "📦", "label": "어제 주문 건수", "value": "—", "sub": "API 미연동"},
-        ]
+        _sales_val = "—"
+        _sales_delta = "<span style='color:#94a3b8;'>API 미연동</span>"
+        _sales_sub = "—"
 
-    # 재고 KPI (독립)
-    total_all_sku = len(product_names)
-
-    if inv_connected:
-        inv_kpi = [
-            {"icon": "🏷️", "label": "총 SKU 수", "value": f"{total_all_sku}개", "sub": "관리 중"},
-            {"icon": "📦", "label": "오늘 출고 품목", "value": f"{inventory_data['total_sku']}개", "sub": "오늘 변동"},
-            {"icon": "⚠️", "label": "재고 부족 품목", "value": f"{inventory_data['low_stock_count']}개", "sub": "10개 이하"},
-        ]
+    _today_shipped = insight_data.get("today_shipped", False)
+    if _today_shipped:
+        _ship_val = f"{insight_data.get('today_count', 0)}건"
+        _anomalies = insight_data.get("anomalies", [])
+        if _anomalies:
+            _ship_delta = f"<span style='color:#dc2626;'>🔴 긴급 {len(_anomalies)}건</span>"
+        else:
+            _ship_delta = "<span style='color:#16a34a;'>✅ 정상 출고 중</span>"
+        _ship_sub = f"추적 {insight_data.get('total_tracked', 0)}품목"
     else:
-        inv_kpi = [
-            {"icon": "🏷️", "label": "총 SKU 수", "value": f"{total_all_sku}개" if total_all_sku else "—", "sub": "관리 중"},
-            {"icon": "📦", "label": "오늘 출고 품목", "value": "—", "sub": "오늘 변동"},
-            {"icon": "⚠️", "label": "재고 부족 품목", "value": "—", "sub": "긴급 확인 필요"},
-        ]
+        _ship_val = "⏳ 대기"
+        _ship_delta = "<span style='color:#94a3b8;'>송장 미출력</span>"
+        _ship_sub = "송장 출력 후 표시"
 
-    kpi_items = sales_kpi + inv_kpi
+    _rate_val = f"{_dash_rate}%"
+    _rate_delta = f"<span style='color:#475569;'>{_dash_done_count} / {len(_dash_today_total)} 완료</span>" if _dash_today_total else "<span style='color:#94a3b8;'>오늘 등록 업무 없음</span>"
+    _rate_color = "#16a34a" if _dash_rate >= 80 else ("#f59e0b" if _dash_rate >= 50 else "#dc2626")
+    _rate_sub = f"미완료 {len(_dash_today_total) - _dash_done_count}건"
 
-    cols = st.columns(len(kpi_items))
-    for col, item in zip(cols, kpi_items):
-        col.markdown(f"""
-        <div class="kpi-card">
-            <div class="icon">{item['icon']}</div>
-            <div class="label">{item['label']}</div>
-            <div class="value">{item['value']}</div>
-            <div class="sub">{item['sub']}</div>
-        </div>
-        """, unsafe_allow_html=True)
+    _hero_cols = st.columns(3)
+    _hero_cols[0].markdown(
+        f"<div class='hero-card' style='--hero-bg-1:#f0fdf4;--hero-bg-2:#dcfce7;--hero-color:#15803d;'>"
+        f"<div class='hero-icon'>💰</div>"
+        f"<div class='hero-label'>어제 총 매출</div>"
+        f"<div class='hero-value'>{_sales_val}</div>"
+        f"<div class='hero-delta'>{_sales_delta}</div>"
+        f"<div class='hero-sub'>{_sales_sub}</div>"
+        f"</div>", unsafe_allow_html=True)
+    _hero_cols[1].markdown(
+        f"<div class='hero-card' style='--hero-bg-1:#eff6ff;--hero-bg-2:#dbeafe;--hero-color:#1d4ed8;'>"
+        f"<div class='hero-icon'>📦</div>"
+        f"<div class='hero-label'>오늘 출고 현황</div>"
+        f"<div class='hero-value'>{_ship_val}</div>"
+        f"<div class='hero-delta'>{_ship_delta}</div>"
+        f"<div class='hero-sub'>{_ship_sub}</div>"
+        f"</div>", unsafe_allow_html=True)
+    _hero_cols[2].markdown(
+        f"<div class='hero-card' style='--hero-bg-1:#fefce8;--hero-bg-2:#fef9c3;--hero-color:{_rate_color};'>"
+        f"<div class='hero-icon'>🎯</div>"
+        f"<div class='hero-label'>오늘 업무 대응률</div>"
+        f"<div class='hero-value'>{_rate_val}</div>"
+        f"<div class='hero-delta'>{_rate_delta}</div>"
+        f"<div class='hero-sub'>{_rate_sub}</div>"
+        f"</div>", unsafe_allow_html=True)
 
+    # API 오류 경고 (간결)
     if sales_error:
-        st.warning(f"⚠️ 매출 API 오류: {sales_data['status']} (주문 API 권한 확인 필요)")
+        st.warning(f"⚠️ 매출 API 오류: {sales_data['status']}")
     if not inv_connected and "오류" in inventory_data.get("status", ""):
         st.warning(f"⚠️ 재고 API 오류: {inventory_data['status']}")
 
-    # ── 판매 대응 상품 요약 ──
-    st.markdown('<div class="section-title"><span class="icon">📋</span> 판매 대응 현황</div>', unsafe_allow_html=True)
+    # ════════════════════════════════════════════════════════
+    # ROW 2 — Action Inbox (좌) | 오늘 직원 대응 (우)
+    # ════════════════════════════════════════════════════════
+    _row2_l, _row2_r = st.columns(2)
 
-    # insight_data는 위에서 병렬 로딩 완료됨
+    # ── 좌: Action Inbox ──
+    with _row2_l:
+        st.markdown('<div class="section-title"><span class="icon">🚦</span> Action Inbox — 지금 처리</div>', unsafe_allow_html=True)
+        _ai_a, _ai_b = st.columns(2)
+        _ai_items = [
+            (_ai_a, "📉 1위 빼앗긴", len(_sig["rank_lost"]),  "#ef5350", "price_monitor", "가격 모니터링"),
+            (_ai_b, "📝 미완료 업무", len(_sig["today_pending"]), "#e65100", "daily_log",     "업무 일지"),
+            (_ai_a, "⏰ 7일 결과",   len(_sig["pending_7d"]),  "#5e35b1", "daily_log",     "사례 DB"),
+            (_ai_b, "🔔 큐 알림",    len(_sig["queued_alerts"]), "#1565c0", None,          "18시 일괄"),
+        ]
+        for _col, _lbl, _n, _c, _page, _hint in _ai_items:
+            _color = _c if _n > 0 else "#cbd5e1"
+            _col.markdown(
+                f"<div class='compact-card' style='border-left:4px solid {_color};'>"
+                f"<div style='display:flex;justify-content:space-between;align-items:center;'>"
+                f"<div><div style='font-size:0.72rem;color:#64748b;'>{_lbl}</div>"
+                f"<div style='font-size:1.5rem;font-weight:800;color:{_color};line-height:1;'>{_n}</div></div>"
+                f"<div style='font-size:0.62rem;color:#94a3b8;'>→ {_hint}</div>"
+                f"</div></div>", unsafe_allow_html=True)
+        with st.expander("📋 처리 항목 상세", expanded=False):
+            if _sig["rank_lost"]:
+                st.markdown("**📉 1위 빼앗긴 키워드**")
+                for r in _sig["rank_lost"][:10]:
+                    _diff = r["our_price"] - r["top1_price"]
+                    st.markdown(f'- `{r["keyword"]}` — 우리 {r["our_rank"]}위 {r["our_price"]:,}원 / 1위 {r["top1_price"]:,}원 (+{_diff:,}원)')
+            if _sig["today_pending"]:
+                st.markdown("**📝 오늘 미완료 업무**")
+                for t in _sig["today_pending"][:10]:
+                    st.markdown(f'- {t.get("title","(제목없음)")}')
+            if _sig["pending_7d"]:
+                st.markdown("**⏰ 7일 결과 확인 필요**")
+                for c in _sig["pending_7d"][:10]:
+                    st.markdown(f'- {c.get("date","")} · {c.get("product_name","")}')
+            if _sig["total"] == 0 and not _sig["queued_alerts"]:
+                st.success("✅ 처리할 항목 없음")
 
-    if insight_data["status"] in ("분석 완료", "송장 미출력"):
-        anomalies = insight_data["anomalies"]
-        watchlist = insight_data.get("watchlist", [])
-        daily_sellers = insight_data["daily_sellers"]
-        _today_shipped = insight_data.get("today_shipped", False)
-
-        # 요약 카드
-        ins_cols = st.columns(4)
-        ins_cols[0].markdown(f"""
-        <div class="kpi-card">
-            <div class="icon">📊</div>
-            <div class="label">최근 출고 상품</div>
-            <div class="value">{insight_data['total_tracked']}개</div>
-            <div class="sub">최근 5영업일</div>
-        </div>
-        """, unsafe_allow_html=True)
-        _ship_label = f"{insight_data['today_count']}개" if _today_shipped else "⏳ 대기"
-        _ship_sub = "현재까지" if _today_shipped else "송장 미출력"
-        ins_cols[1].markdown(f"""
-        <div class="kpi-card">
-            <div class="icon">📦</div>
-            <div class="label">오늘 출고</div>
-            <div class="value">{_ship_label}</div>
-            <div class="sub">{_ship_sub}</div>
-        </div>
-        """, unsafe_allow_html=True)
-        if _today_shipped:
-            _urgent_color = "#f5576c" if anomalies else "#22c55e"
-            _urgent_val = f"{len(anomalies)}개"
-            _urgent_sub = "매일 출고 → 오늘 0"
-            _watch_color = "#f59e0b" if watchlist else "#22c55e"
-            _watch_val = f"{len(watchlist)}개"
-            _watch_sub = "간헐 출고 → 오늘 0"
-        else:
-            _urgent_color = "#9ca3af"
-            _urgent_val = "—"
-            _urgent_sub = "송장 출력 후 확인"
-            _watch_color = "#9ca3af"
-            _watch_val = "—"
-            _watch_sub = "송장 출력 후 확인"
-        ins_cols[2].markdown(f"""
-        <div class="kpi-card" style="border-color: {_urgent_color}40;">
-            <div class="icon">🔴</div>
-            <div class="label">긴급 대응</div>
-            <div class="value" style="color: {_urgent_color};">{_urgent_val}</div>
-            <div class="sub">{_urgent_sub}</div>
-        </div>
-        """, unsafe_allow_html=True)
-        ins_cols[3].markdown(f"""
-        <div class="kpi-card" style="border-color: {_watch_color}40;">
-            <div class="icon">🟡</div>
-            <div class="label">추가 확인</div>
-            <div class="value" style="color: {_watch_color};">{_watch_val}</div>
-            <div class="sub">{_watch_sub}</div>
-        </div>
-        """, unsafe_allow_html=True)
-
-        # 대시보드에서는 간단 요약만 표시
-        if not _today_shipped:
-            st.info("📋 오늘 송장이 아직 출력되지 않았습니다. 송장 출력(출고 처리) 후 판매 대응 상품이 자동으로 표시됩니다.")
-        else:
-            product_names_map = fetch_product_names()
-            if anomalies:
-                st.markdown(f"**🔴 긴급 대응 {len(anomalies)}개** — 상세 내용은 '판매 대응' 메뉴에서 확인하세요.")
-                for item in anomalies[:5]:
-                    pid = item["product_id"]
-                    name = product_names_map.get(pid, pid)
-                    brand = extract_brand(name)
-                    st.markdown(f"- 🔴 **[{brand}]** {name} — 일평균 {item['avg_qty']}개, 오늘 0개")
-                if len(anomalies) > 5:
-                    st.caption(f"...외 {len(anomalies) - 5}개 상품")
-            if watchlist:
-                st.markdown(f"**🟡 추가 확인 {len(watchlist)}개** — 긴급 대응 완료 후 확인하세요.")
-                for item in watchlist[:3]:
-                    pid = item["product_id"]
-                    name = product_names_map.get(pid, pid)
-                    brand = extract_brand(name)
-                    st.markdown(f"- 🟡 **[{brand}]** {name} — 일평균 {item['avg_qty']}개, 오늘 0개")
-                if len(watchlist) > 3:
-                    st.caption(f"...외 {len(watchlist) - 3}개 상품")
-            if not anomalies and not watchlist:
-                st.success("✅ 판매 대응 필요 상품 없음 — 매일 출고 상품이 오늘도 정상 출고 중입니다.")
-    elif insight_data["status"] != "미연동":
-        st.info(f"📊 판매 인사이트: {insight_data['status']}")
-
-    # ── 브랜드별 오늘 출고 현황 (CEO 관점) ──
-    if inv_connected:
-        st.markdown('<div class="section-title"><span class="icon">📈</span> 브랜드별 오늘 출고 현황</div>', unsafe_allow_html=True)
-        brand_summary = {}
-        for item in inventory_data.get("items", []):
-            pid = item["product_id"]
-            name = product_names.get(pid, pid)
-            brand = extract_brand(name)
-            if brand not in brand_summary:
-                brand_summary[brand] = {"품목수": 0, "총출고": 0, "부족": 0}
-            brand_summary[brand]["품목수"] += 1
-            brand_summary[brand]["총출고"] += abs(item["trans_qty"])
-            if item["stock_qty"] <= 10:
-                brand_summary[brand]["부족"] += 1
-
-        if brand_summary:
-            brand_rows = []
-            for brand, info in sorted(brand_summary.items(), key=lambda x: -x[1]["총출고"]):
-                brand_rows.append({
-                    "브랜드": brand,
-                    "출고 품목수": info["품목수"],
-                    "총 출고량": info["총출고"],
-                    "재고 부족": f"{info['부족']}개" if info["부족"] else "—",
-                })
-            st.dataframe(pd.DataFrame(brand_rows), width="stretch", hide_index=True)
-
-    # ── CEO 대응 현황 (대시보드 메인) ──
-    _dash_today_str = today.strftime("%Y-%m-%d")
-    _dash_tasks = load_json(TASKS_FILE, {"tasks": []}).get("tasks", [])
-    _dash_today_actions = [t for t in _dash_tasks if t.get("due") == _dash_today_str and t.get("action")]
-    _dash_today_total = [t for t in _dash_tasks if t.get("due") == _dash_today_str]
-    _dash_done_count = sum(1 for t in _dash_today_total if t.get("done"))
-
-    if _dash_today_actions or _dash_today_total:
-        st.markdown('<div class="section-title"><span class="icon">📋</span> 오늘 직원 대응 현황</div>', unsafe_allow_html=True)
-
-        # 요약 카드
-        _dash_rate = round(_dash_done_count / len(_dash_today_total) * 100) if _dash_today_total else 0
-        _dc1, _dc2, _dc3 = st.columns(3)
-        _dc1.metric("전체 업무", f"{len(_dash_today_total)}건")
-        _dc2.metric("완료", f"{_dash_done_count}건")
-        _dc3.metric("대응률", f"{_dash_rate}%")
-
+    # ── 우: 오늘 직원 대응 ──
+    with _row2_r:
+        st.markdown('<div class="section-title"><span class="icon">📋</span> 오늘 직원 대응</div>', unsafe_allow_html=True)
         if _dash_today_actions:
-            for t in sorted(_dash_today_actions, key=lambda x: x.get("done_at", ""), reverse=True):
-                _a = t.get("action", {})
-                _time = _a.get("time", t.get("done_at", "")[-5:])
+            _recent_actions = sorted(_dash_today_actions, key=lambda x: x.get("done_at", ""), reverse=True)[:6]
+            _rows_html = []
+            for t in _recent_actions:
+                _a      = t.get("action", {})
+                _time   = _a.get("time", t.get("done_at", "")[-5:])
                 _type_lbl = _a.get("label", "✅")
-                _pname = t.get("meta", {}).get("product_name", t.get("title", ""))
-                _detail = _a.get("detail", "")
-                _memo = _a.get("memo", "")
-                _detail_html = f'<span style="color:#1565c0; font-size:0.78rem;"> — 📋 {_detail}</span>' if _detail else ""
-                _memo_html = f'<span style="color:#888; font-size:0.72rem;"> 💬 {_memo}</span>' if _memo else ""
-                st.markdown(f"""
-                <div style="padding:0.4rem 0.7rem; margin-bottom:0.2rem; border-radius:6px; background:#fafafa; border-left:3px solid #66bb6a;">
-                    <span style="font-size:0.72rem; color:#999;">{_time}</span>
-                    <span style="font-size:0.82rem; font-weight:600; margin-left:0.3rem;">{_type_lbl}</span>
-                    <span style="font-size:0.82rem;"> {_pname}</span>
-                    {_detail_html}{_memo_html}
-                </div>
-                """, unsafe_allow_html=True)
+                _pname  = t.get("meta", {}).get("product_name", t.get("title", ""))[:25]
+                _worker = _a.get("worker", "MD")
+                _rows_html.append(
+                    f"<div style='padding:0.35rem 0.6rem;margin-bottom:0.25rem;border-radius:6px;background:#f8fafc;border-left:3px solid #66bb6a;font-size:0.78rem;'>"
+                    f"<span style='color:#94a3b8;'>{_time}</span> "
+                    f"<span style='color:#1e293b;font-weight:600;'>{_type_lbl}</span> "
+                    f"<span style='color:#475569;'>{_pname}</span> "
+                    f"<span style='color:#94a3b8;font-size:0.7rem;float:right;'>👤 {_worker}</span>"
+                    f"</div>"
+                )
+            st.markdown("".join(_rows_html), unsafe_allow_html=True)
+            if len(_dash_today_actions) > 6:
+                st.caption(f"...외 {len(_dash_today_actions) - 6}건 → 업무 일지 메뉴")
         elif _dash_today_total:
-            st.info("아직 대응 완료된 업무가 없습니다.")
+            st.info(f"📋 등록 업무 {len(_dash_today_total)}건, 아직 대응 완료 0건")
+        else:
+            st.success("✅ 오늘 등록된 업무가 없습니다.")
+
+    # ════════════════════════════════════════════════════════
+    # ROW 3 — 핀 SKU (한 줄)
+    # ════════════════════════════════════════════════════════
+    if _pinned:
+        st.markdown('<div class="section-title"><span class="icon">📌</span> 즐겨찾기 SKU</div>', unsafe_allow_html=True)
+        _pin_cols = st.columns(min(len(_pinned), 5))
+        for i, p in enumerate(_pinned[:5]):
+            with _pin_cols[i]:
+                _kw = p.get("keyword", "")
+                _nm = p.get("name") or _kw
+                _hist = get_price_history(_kw, days=30)
+                _last = _hist[-1] if _hist else None
+                if _last:
+                    _our   = _last.get("our", [])
+                    _our_p = _our[0]["price"] if _our else None
+                    _our_r = _our[0]["rank"] if _our else None
+                    _t1    = _last.get("top1", {}).get("price", 0)
+                    _diff_html = ""
+                    if _our_p and _t1:
+                        _d = _our_p - _t1
+                        _color = "#ef5350" if _d > 0 else "#16a34a"
+                        _diff_html = f"<div class='ps-diff' style='color:{_color};'>vs 1위 {_d:+,}원</div>"
+                    _info = f"우리 {_our_r}위 · {_our_p:,}원" if _our_r else "<span style='color:#999;'>우리매장 미발견</span>"
+                    _content = f"<div class='ps-name'>{_nm[:14]}</div><div class='ps-info'>{_info}</div>{_diff_html}"
+                else:
+                    _content = f"<div class='ps-name'>{_nm[:14]}</div><div class='ps-info' style='color:#999;'>스냅샷 없음</div>"
+                st.markdown(f"<div class='pin-slim'>{_content}</div>", unsafe_allow_html=True)
+                if st.button("🔍 열기", key=f"_pin_open_{i}", width="stretch"):
+                    st.session_state.current_page = "price_monitor"
+                    st.session_state["_auto_price_keyword"] = _kw
+                    st.session_state["active_keyword"] = _kw
+                    st.rerun()
+
+    # ════════════════════════════════════════════════════════
+    # ROW 4 — 브랜드 Top5 | 긴급대응 Top3 | CEO 메시지
+    # ════════════════════════════════════════════════════════
+    _row4_a, _row4_b, _row4_c = st.columns([1.4, 1.3, 1.3])
+
+    # ── 좌: 브랜드별 출고 Top5 (미니바) ──
+    with _row4_a:
+        st.markdown('<div class="section-title"><span class="icon">📈</span> 브랜드 출고 Top5</div>', unsafe_allow_html=True)
+        if inv_connected:
+            _brand_summary = {}
+            for item in inventory_data.get("items", []):
+                pid = item["product_id"]
+                name = product_names.get(pid, pid)
+                brand = extract_brand(name)
+                if brand not in _brand_summary:
+                    _brand_summary[brand] = {"품목수": 0, "총출고": 0, "부족": 0}
+                _brand_summary[brand]["품목수"] += 1
+                _brand_summary[brand]["총출고"] += abs(item["trans_qty"])
+                if item["stock_qty"] <= 10:
+                    _brand_summary[brand]["부족"] += 1
+            if _brand_summary:
+                _sorted_brands = sorted(_brand_summary.items(), key=lambda x: -x[1]["총출고"])[:5]
+                _max_qty = max((b[1]["총출고"] for b in _sorted_brands), default=1) or 1
+                _bar_html = []
+                for _bn, _bi in _sorted_brands:
+                    _pct = int(_bi["총출고"] / _max_qty * 100)
+                    _short_color = "#dc2626" if _bi["부족"] else "#3b82f6"
+                    _short_lbl = f"⚠️{_bi['부족']}" if _bi["부족"] else f"📦{_bi['품목수']}"
+                    _bar_html.append(
+                        f"<div style='margin-bottom:0.45rem;'>"
+                        f"<div style='display:flex;justify-content:space-between;font-size:0.75rem;margin-bottom:0.15rem;'>"
+                        f"<span style='font-weight:700;color:#1e293b;'>{_bn[:10]}</span>"
+                        f"<span style='color:#475569;'>{_bi['총출고']:,} <span style='color:{_short_color};font-size:0.68rem;margin-left:0.3rem;'>{_short_lbl}</span></span>"
+                        f"</div>"
+                        f"<div style='background:#f1f5f9;height:6px;border-radius:3px;overflow:hidden;'>"
+                        f"<div style='background:linear-gradient(90deg,#3b82f6,#60a5fa);height:100%;width:{_pct}%;'></div>"
+                        f"</div></div>"
+                    )
+                st.markdown("".join(_bar_html), unsafe_allow_html=True)
+                with st.expander("전체 브랜드 표", expanded=False):
+                    _brand_rows = [{
+                        "브랜드": _bn,
+                        "출고 품목수": _bi["품목수"],
+                        "총 출고량": _bi["총출고"],
+                        "재고 부족": f"{_bi['부족']}개" if _bi["부족"] else "—",
+                    } for _bn, _bi in sorted(_brand_summary.items(), key=lambda x: -x[1]["총출고"])]
+                    st.dataframe(pd.DataFrame(_brand_rows), width="stretch", hide_index=True)
+            else:
+                st.caption("브랜드별 출고 데이터 없음")
+        else:
+            st.caption("재고 API 미연동")
+
+    # ── 중: 긴급 대응 Top3 ──
+    with _row4_b:
+        st.markdown('<div class="section-title"><span class="icon">🔴</span> 긴급 대응 Top3</div>', unsafe_allow_html=True)
+        if insight_data["status"] in ("분석 완료", "송장 미출력"):
+            _anom = insight_data.get("anomalies", [])
+            _watch = insight_data.get("watchlist", [])
+            if not _today_shipped:
+                st.info("📋 송장 출력 후 표시")
+            elif _anom:
+                _name_map = product_names
+                _rows = []
+                for item in _anom[:3]:
+                    _pid = item["product_id"]
+                    _nm  = _name_map.get(_pid, _pid)
+                    _br  = extract_brand(_nm)
+                    _rows.append(
+                        f"<div style='padding:0.4rem 0.6rem;margin-bottom:0.3rem;border-radius:6px;background:#fef2f2;border-left:3px solid #dc2626;'>"
+                        f"<div style='font-size:0.72rem;color:#991b1b;font-weight:700;'>[{_br}]</div>"
+                        f"<div style='font-size:0.78rem;color:#1e293b;'>{_nm[:30]}</div>"
+                        f"<div style='font-size:0.68rem;color:#64748b;'>일평균 {item['avg_qty']}개 → 오늘 0</div>"
+                        f"</div>"
+                    )
+                st.markdown("".join(_rows), unsafe_allow_html=True)
+                if len(_anom) > 3:
+                    st.caption(f"...외 긴급 {len(_anom) - 3}건 / 추가확인 {len(_watch)}건 → 판매대응 메뉴")
+                elif _watch:
+                    st.caption(f"추가확인 {len(_watch)}건 → 판매대응 메뉴")
+            elif _watch:
+                st.success(f"✅ 긴급 없음. 추가확인 {len(_watch)}건만 존재")
+            else:
+                st.success("✅ 모두 정상 출고 중")
+        else:
+            st.caption(f"📊 {insight_data['status']}")
+
+    # ── 우: CEO 메시지 ──
+    with _row4_c:
+        st.markdown('<div class="section-title"><span class="icon">💬</span> CEO 전략</div>', unsafe_allow_html=True)
+        if _ceo_data.get("message"):
+            _msg_html = _ceo_data['message'].replace(chr(10), '<br>')
+            st.markdown(
+                f"<div style='background:linear-gradient(135deg,#eef2ff,#e0e7ff);border:1px solid #c7d2fe;border-radius:10px;padding:0.7rem 0.9rem;min-height:120px;'>"
+                f"<div style='font-size:0.85rem;color:#1e1b4b;line-height:1.45;'>{_msg_html}</div>"
+                f"<div style='font-size:0.65rem;color:#6366f1;margin-top:0.4rem;text-align:right;'>최종 수정: {_ceo_data.get('updated','-')}</div>"
+                f"</div>", unsafe_allow_html=True)
+        else:
+            st.markdown(
+                "<div style='background:#f8fafc;border:1px dashed #cbd5e1;border-radius:10px;padding:1rem;text-align:center;color:#94a3b8;font-size:0.8rem;min-height:120px;display:flex;align-items:center;justify-content:center;'>"
+                "오늘 등록된 CEO 메시지 없음"
+                "</div>", unsafe_allow_html=True)
+        with st.expander("✏️ CEO 메시지 수정", expanded=False):
+            _new_msg = st.text_area("메시지", value=_ceo_data.get("message", ""), height=100,
+                                     placeholder="오늘의 전략을 입력하세요...", key="_dash_ceo_edit")
+            if st.button("💾 저장", type="primary", width="stretch", key="_dash_ceo_save"):
+                save_json(CEO_MSG_FILE, {
+                    "message": _new_msg,
+                    "updated": datetime.now(KST).strftime("%Y-%m-%d %H:%M"),
+                })
+                st.success("저장 완료")
+                st.rerun()
+
+    # ════════════════════════════════════════════════════════
+    # 보조 정보 (접힘) — 추가 KPI / 판매대응 상세 / 브랜드 풀표
+    # ════════════════════════════════════════════════════════
+    with st.expander("📊 추가 지표 보기 (SKU 수 · 재고 부족 · 추가 확인 등)", expanded=False):
+        _total_all_sku = len(product_names)
+        _ek_cols = st.columns(4)
+        _extra_kpis = [
+            ("🏷️", "총 SKU 수", f"{_total_all_sku}개" if _total_all_sku else "—"),
+            ("📦", "오늘 출고 품목", f"{inventory_data['total_sku']}개" if inv_connected else "—"),
+            ("⚠️", "재고 부족 품목", f"{inventory_data['low_stock_count']}개" if inv_connected else "—"),
+            ("🟡", "추가 확인 대상", f"{len(insight_data.get('watchlist', []))}개" if insight_data["status"] in ("분석 완료","송장 미출력") else "—"),
+        ]
+        for _col, (_ic, _lb, _vl) in zip(_ek_cols, _extra_kpis):
+            _col.markdown(
+                f"<div class='kpi-card'><div class='icon'>{_ic}</div>"
+                f"<div class='label'>{_lb}</div><div class='value'>{_vl}</div></div>",
+                unsafe_allow_html=True)
+
+        if insight_data["status"] in ("분석 완료", "송장 미출력") and _today_shipped:
+            _watch = insight_data.get("watchlist", [])
+            if _watch:
+                st.markdown("**🟡 추가 확인 상품**")
+                for item in _watch[:8]:
+                    _pid = item["product_id"]
+                    _nm = product_names.get(_pid, _pid)
+                    _br = extract_brand(_nm)
+                    st.markdown(f"- 🟡 **[{_br}]** {_nm} — 일평균 {item['avg_qty']}개, 오늘 0개")
 
 
 # ─────────────────────────────────────────────
