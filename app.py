@@ -1466,31 +1466,70 @@ def get_global_period() -> tuple:
     return (today - timedelta(days=6), today, "최근 7일")
 
 
-def compute_action_signals() -> dict:
-    """홈 Action Inbox용 — 로컬 JSON만 읽어 빠르게 신호 집계 (API 호출 없음)."""
-    today = datetime.now(KST).strftime("%Y-%m-%d")
+def compute_action_signals(fresh_days: int = 7) -> dict:
+    """홈 Action Inbox용 — 로컬 JSON만 읽어 빠르게 신호 집계 (API 호출 없음).
 
-    # 1) 1위 빼앗긴 키워드 (가장 최근 스냅샷 기준)
+    fresh_days: 이 일수 이내 스냅샷만 '순위 미달' 카운트에 포함.
+    반환:
+      - rank_lost (전체, fresh): stolen + neverwon 합 (하위 호환 유지)
+      - rank_lost_stolen: 과거 1위 기록이 있었으나 현재 1위 아님 (진짜 빼앗김)
+      - rank_lost_neverwon: 한 번도 1위가 아니었던 키워드
+      - snapshots_total / snapshots_fresh / oldest_kw_date
+    """
+    today = datetime.now(KST).strftime("%Y-%m-%d")
+    fresh_cutoff = (datetime.now(KST) - timedelta(days=fresh_days)).strftime("%Y-%m-%d")
+
+    # 1) 키워드별 전체 이력 + 최신 스냅샷
     ph = load_json(PRICE_HISTORY_FILE, {"history": []}).get("history", [])
-    latest_per_kw = {}
+    history_per_kw: dict = {}
+    latest_per_kw: dict = {}
     for h in ph:
         k = h.get("keyword")
         if not k:
             continue
+        history_per_kw.setdefault(k, []).append(h)
         if k not in latest_per_kw or h.get("date","") > latest_per_kw[k].get("date",""):
             latest_per_kw[k] = h
-    rank_lost = []
+
+    # 키워드별 was_ever_top1 판정 (전체 이력 스캔)
+    def _was_ever_top1(snaps: list) -> bool:
+        for s in snaps:
+            ours = s.get("our", [])
+            if ours and ours[0].get("rank", 99) == 1:
+                return True
+        return False
+
+    rank_lost_stolen   = []
+    rank_lost_neverwon = []
+    fresh_kw_count = 0
+    stale_kw_count = 0
+
     for k, snap in latest_per_kw.items():
+        snap_date = snap.get("date", "")
+        # 신선도 필터: fresh_cutoff 이전 스냅샷은 제외
+        if snap_date < fresh_cutoff:
+            stale_kw_count += 1
+            continue
+        fresh_kw_count += 1
         ours = snap.get("our", [])
-        if ours and ours[0].get("rank", 99) > 1:
-            rank_lost.append({
-                "keyword": k,
-                "our_rank": ours[0]["rank"],
-                "our_price": ours[0]["price"],
-                "top1_price": snap.get("top1", {}).get("price", 0),
-                "date": snap.get("date", ""),
-            })
-    rank_lost.sort(key=lambda x: x["our_rank"])
+        if not ours or ours[0].get("rank", 99) <= 1:
+            continue
+        item = {
+            "keyword":    k,
+            "our_rank":   ours[0]["rank"],
+            "our_price":  ours[0]["price"],
+            "top1_price": snap.get("top1", {}).get("price", 0),
+            "date":       snap_date,
+            "snapshots":  len(history_per_kw.get(k, [])),
+        }
+        if _was_ever_top1(history_per_kw.get(k, [])):
+            rank_lost_stolen.append(item)
+        else:
+            rank_lost_neverwon.append(item)
+
+    rank_lost_stolen.sort(key=lambda x: x["our_rank"])
+    rank_lost_neverwon.sort(key=lambda x: x["our_rank"])
+    rank_lost = rank_lost_stolen + rank_lost_neverwon  # 하위 호환
 
     # 2) 오늘 미완료 업무
     tasks = load_json(TASKS_FILE, {"tasks": []}).get("tasks", [])
@@ -1505,11 +1544,16 @@ def compute_action_signals() -> dict:
     queued = [a for a in alerts if a.get("queued_at", "").startswith(today)]
 
     return {
-        "rank_lost":     rank_lost,
-        "today_pending": today_pending,
-        "pending_7d":    pending_7d,
-        "queued_alerts": queued,
-        "total":         len(rank_lost) + len(today_pending) + len(pending_7d),
+        "rank_lost":          rank_lost,
+        "rank_lost_stolen":   rank_lost_stolen,
+        "rank_lost_neverwon": rank_lost_neverwon,
+        "snapshots_fresh":    fresh_kw_count,
+        "snapshots_stale":    stale_kw_count,
+        "fresh_days":         fresh_days,
+        "today_pending":      today_pending,
+        "pending_7d":         pending_7d,
+        "queued_alerts":      queued,
+        "total":              len(rank_lost) + len(today_pending) + len(pending_7d),
     }
 
 
@@ -5482,13 +5526,33 @@ if current_page == "dashboard":
     with _row2_l:
         st.markdown('<div class="section-title"><span class="icon">🚦</span> Action Inbox — 지금 처리</div>', unsafe_allow_html=True)
         _ai_a, _ai_b = st.columns(2)
+
+        # "1위 빼앗긴" 카드: stolen 큰 숫자 + neverwon 작은 숫자
+        _stolen_n   = len(_sig.get("rank_lost_stolen", []))
+        _neverwon_n = len(_sig.get("rank_lost_neverwon", []))
+        _fresh_n    = _sig.get("snapshots_fresh", 0)
+        _stale_n    = _sig.get("snapshots_stale", 0)
+        _stolen_color = "#ef5350" if _stolen_n > 0 else "#cbd5e1"
+        _fresh_days_n = _sig.get('fresh_days', 7)
+        _stale_html = f" · stale {_stale_n}" if _stale_n else ""
+        _ai_a.markdown(
+            f"<div class='compact-card' style='border-left:4px solid {_stolen_color};' "
+            f"title='최근 {_fresh_days_n}일 내 스냅샷 기준'>"
+            f"<div style='display:flex;justify-content:space-between;align-items:flex-start;'>"
+            f"<div><div style='font-size:0.72rem;color:#64748b;'>🥇 1위 빼앗긴 <span style='color:#94a3b8;font-weight:400;'>(과거 1위 → 현재 ↓)</span></div>"
+            f"<div style='font-size:1.5rem;font-weight:800;color:{_stolen_color};line-height:1;'>{_stolen_n}"
+            f"<span style='font-size:0.78rem;font-weight:600;color:#94a3b8;margin-left:0.4rem;'>+ 미달 {_neverwon_n}</span>"
+            f"</div></div>"
+            f"<div style='font-size:0.62rem;color:#94a3b8;text-align:right;'>→ 가격 모니터링<br/>"
+            f"<span style='color:#cbd5e1;'>최근 {_fresh_days_n}일 {_fresh_n}건{_stale_html}</span></div>"
+            f"</div></div>", unsafe_allow_html=True)
+
         _ai_items = [
-            (_ai_a, "📉 1위 빼앗긴", len(_sig["rank_lost"]),  "#ef5350", "price_monitor", "가격 모니터링"),
-            (_ai_b, "📝 미완료 업무", len(_sig["today_pending"]), "#e65100", "daily_log",     "업무 일지"),
-            (_ai_a, "⏰ 7일 결과",   len(_sig["pending_7d"]),  "#5e35b1", "daily_log",     "사례 DB"),
-            (_ai_b, "🔔 큐 알림",    len(_sig["queued_alerts"]), "#1565c0", None,          "18시 일괄"),
+            (_ai_b, "📝 미완료 업무", len(_sig["today_pending"]), "#e65100", "업무 일지"),
+            (_ai_a, "⏰ 7일 결과",   len(_sig["pending_7d"]),    "#5e35b1", "사례 DB"),
+            (_ai_b, "🔔 큐 알림",    len(_sig["queued_alerts"]), "#1565c0", "18시 일괄"),
         ]
-        for _col, _lbl, _n, _c, _page, _hint in _ai_items:
+        for _col, _lbl, _n, _c, _hint in _ai_items:
             _color = _c if _n > 0 else "#cbd5e1"
             _col.markdown(
                 f"<div class='compact-card' style='border-left:4px solid {_color};'>"
@@ -5497,12 +5561,29 @@ if current_page == "dashboard":
                 f"<div style='font-size:1.5rem;font-weight:800;color:{_color};line-height:1;'>{_n}</div></div>"
                 f"<div style='font-size:0.62rem;color:#94a3b8;'>→ {_hint}</div>"
                 f"</div></div>", unsafe_allow_html=True)
+
         with st.expander("📋 처리 항목 상세", expanded=False):
-            if _sig["rank_lost"]:
-                st.markdown("**📉 1위 빼앗긴 키워드**")
-                for r in _sig["rank_lost"][:10]:
+            # 1위 빼앗긴 (진짜)
+            if _sig.get("rank_lost_stolen"):
+                st.markdown(f"**🥇 1위 빼앗긴 ({_stolen_n}건) — 과거 1위 기록 있음, 현재 밀림**")
+                for r in _sig["rank_lost_stolen"][:10]:
                     _diff = r["our_price"] - r["top1_price"]
-                    st.markdown(f'- `{r["keyword"]}` — 우리 {r["our_rank"]}위 {r["our_price"]:,}원 / 1위 {r["top1_price"]:,}원 (+{_diff:,}원)')
+                    st.markdown(
+                        f'- `{r["keyword"]}` — 우리 **{r["our_rank"]}위** {r["our_price"]:,}원 / 1위 {r["top1_price"]:,}원 '
+                        f'(+{_diff:,}원) · 스냅샷 {r.get("snapshots",1)}건 · {r["date"]}'
+                    )
+            # 1위 미달 (한 번도 못)
+            if _sig.get("rank_lost_neverwon"):
+                st.markdown(f"**📍 1위 미달 ({_neverwon_n}건) — 한 번도 1위였던 적 없음**")
+                for r in _sig["rank_lost_neverwon"][:10]:
+                    _diff = r["our_price"] - r["top1_price"]
+                    st.markdown(
+                        f'- `{r["keyword"]}` — 우리 **{r["our_rank"]}위** {r["our_price"]:,}원 / 1위 {r["top1_price"]:,}원 '
+                        f'(+{_diff:,}원) · 스냅샷 {r.get("snapshots",1)}건 · {r["date"]}'
+                    )
+            if _stale_n:
+                st.caption(f"⚠️ {_stale_n}개 키워드는 최근 {_sig.get('fresh_days',7)}일 내 스냅샷이 없어 제외됨 — 가격 모니터링에서 재검색 권장.")
+
             if _sig["today_pending"]:
                 st.markdown("**📝 오늘 미완료 업무**")
                 for t in _sig["today_pending"][:10]:
