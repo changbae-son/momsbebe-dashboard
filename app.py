@@ -177,36 +177,36 @@ st.markdown("""
     .kpi-card .sub { font-size: 0.58rem; opacity: 0.5; margin-top: 0.05rem; }
     .kpi-card.pending .value { opacity: 0.35; font-size: 0.85rem; }
 
-    /* ── HERO 카드 (대시보드 상단 큰 숫자) ── */
+    /* ── HERO 카드 (대시보드 상단 큰 숫자) — 컴팩트 ── */
     .hero-card {
-        padding: 1.2rem 1.4rem;
-        border-radius: 14px;
+        padding: 0.75rem 1rem;
+        border-radius: 12px;
         border: 1px solid rgba(128,128,128,0.15);
         background: linear-gradient(135deg, var(--hero-bg-1, #f8fafc), var(--hero-bg-2, #eef2ff));
         position: relative;
         overflow: hidden;
-        min-height: 130px;
+        min-height: 92px;
     }
     .hero-card .hero-label {
-        font-size: 0.78rem; color: #64748b; font-weight: 600;
+        font-size: 0.74rem; color: #334155; font-weight: 700;
         text-transform: uppercase; letter-spacing: 0.04em;
     }
     .hero-card .hero-value {
-        font-size: 2.4rem; font-weight: 900; line-height: 1.1;
-        margin-top: 0.4rem; color: var(--hero-color, #0f172a);
+        font-size: 1.85rem; font-weight: 900; line-height: 1.05;
+        margin-top: 0.2rem; color: var(--hero-color, #0f172a);
     }
     .hero-card .hero-delta {
-        font-size: 0.95rem; font-weight: 700; margin-top: 0.3rem;
+        font-size: 0.85rem; font-weight: 800; margin-top: 0.15rem;
     }
     .hero-card .hero-sub {
-        font-size: 0.72rem; color: #64748b; margin-top: 0.2rem;
+        font-size: 0.7rem; color: #475569; font-weight: 600; margin-top: 0.1rem;
     }
     .hero-card .hero-icon {
-        position: absolute; top: 0.9rem; right: 1rem;
-        font-size: 2rem; opacity: 0.18;
+        position: absolute; top: 0.55rem; right: 0.7rem;
+        font-size: 1.5rem; opacity: 0.18;
     }
 
-    /* ── 컴팩트 카드 (사이드 섹션) ── */
+    /* ── 컴팩트 카드 (사이드 섹션) — 글씨 진하게 ── */
     .compact-card {
         padding: 0.7rem 0.9rem;
         border-radius: 10px;
@@ -215,11 +215,11 @@ st.markdown("""
         margin-bottom: 0.5rem;
     }
     .compact-card .cc-title {
-        font-size: 0.78rem; font-weight: 700; color: #334155;
+        font-size: 0.82rem; font-weight: 800; color: #0f172a;
         margin-bottom: 0.35rem; display: flex; justify-content: space-between;
     }
     .compact-card .cc-row {
-        font-size: 0.78rem; color: #475569; padding: 0.15rem 0;
+        font-size: 0.82rem; color: #1e293b; font-weight: 600; padding: 0.18rem 0;
         display: flex; justify-content: space-between; align-items: center;
         border-top: 1px dashed #f1f5f9;
     }
@@ -6548,7 +6548,14 @@ if current_page == "dashboard":
     # 헤더 캡션 (분석 기간 + 마지막 갱신)
     _last_refresh = st.session_state[_dash_cache_ts].strftime("%H:%M")
     _hc1, _hc2 = st.columns([6, 1])
-    _hc1.caption(f"📅 분석 기간: **{_g_label}** ({_g_start} ~ {_g_end}) · 마지막 갱신 {_last_refresh}")
+    _hc1.markdown(
+        f"<div style='font-size:0.92rem;font-weight:700;color:#0f172a;padding:0.4rem 0;'>"
+        f"📅 분석 기간: <span style='color:#1d4ed8;'>{_g_label}</span> "
+        f"<span style='color:#475569;font-weight:600;'>({_g_start} ~ {_g_end})</span> "
+        f"· 마지막 갱신 <span style='color:#0f172a;font-weight:800;'>{_last_refresh}</span>"
+        f"</div>",
+        unsafe_allow_html=True,
+    )
     if _hc2.button("🔄 새로고침", key="_dash_refresh", use_container_width=True):
         st.session_state.pop(_dash_cache_key, None)
         st.session_state.pop(_dash_cache_ts, None)
@@ -6698,9 +6705,9 @@ if current_page == "dashboard":
             if _sig["total"] == 0 and not _sig["queued_alerts"]:
                 st.success("✅ 처리할 항목 없음")
 
-    # ── 우: 오늘 직원 대응 ──
+    # ── 우: 오늘 MD 중요 대응 ──
     with _row2_r:
-        st.markdown('<div class="section-title"><span class="icon">📋</span> 오늘 직원 대응</div>', unsafe_allow_html=True)
+        st.markdown('<div class="section-title"><span class="icon">📋</span> 오늘 MD 중요 대응</div>', unsafe_allow_html=True)
         if _dash_today_actions:
             _recent_actions = sorted(_dash_today_actions, key=lambda x: x.get("done_at", ""), reverse=True)[:6]
             _rows_html = []
