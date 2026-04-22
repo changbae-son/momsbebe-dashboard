@@ -1576,7 +1576,7 @@ def compute_board_items() -> list:
             "skip_if_zero": False,
         },
     ]
-    stages.append({"stage": 1, "title": "🌅 출근 정비 (08:00~송장 전)",
+    stages.append({"stage": 1, "title": "🌅 송장출력전 업무",
                    "time_window": (8, 10), "items": s1_items})
 
     # ── Stage 2: 송장 (10:00 무렵) ──
@@ -1593,7 +1593,7 @@ def compute_board_items() -> list:
             "skip_if_zero": False,
         }
     ]
-    stages.append({"stage": 2, "title": "📦 송장 출력 (10:00 무렵)",
+    stages.append({"stage": 2, "title": "📦 송장출력",
                    "time_window": (10, 11), "items": s2_items})
 
     # ── Stage 3: 본 게임 (송장 후 ~ 17:00) ──
@@ -1648,7 +1648,7 @@ def compute_board_items() -> list:
             "skip_if_zero": True,
         },
     ]
-    stages.append({"stage": 3, "title": "🎯 본 게임 (송장 후~17:00)",
+    stages.append({"stage": 3, "title": "🎯 송장출력후 업무",
                    "time_window": (10, 17), "items": s3_items})
 
     # ── Stage 4: 마감 (17:00~18:00) ──
@@ -1687,7 +1687,7 @@ def compute_board_items() -> list:
             "skip_if_zero": False,
         },
     ]
-    stages.append({"stage": 4, "title": "🌙 마감 점검 (17:00~18:00)",
+    stages.append({"stage": 4, "title": "🌙 마감점검 및 대응",
                    "time_window": (17, 18), "items": s4_items})
 
     return stages
