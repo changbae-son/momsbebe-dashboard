@@ -2800,9 +2800,16 @@ def fetch_sales_insight() -> dict:
         })
     daily_sellers.sort(key=lambda x: (-x["active_days"], -x["avg_qty"]))
 
+    # ── B2B(로켓/제트) 납품 전용 SKU 사전 수집 ──
+    try:
+        b2b_pids = get_b2b_only_product_ids(days=14)
+    except Exception:
+        b2b_pids = set()
+
     # 이상 징후: 송장 출력 후에만 계산
     anomalies = []   # 🔴 긴급 대응: 70%+ 출고 → 오늘 0
     watchlist = []    # 🟡 추가 확인: 40~70% 출고 → 오늘 0
+    b2b_anomalies = []  # B2B 납품 채널 전용 이상 징후 (별도 탭용)
     if today_shipped:
         threshold_urgent = max(len(work_days) * 0.7, 2)    # 70%
         threshold_watch = max(len(work_days) * 0.4, 1)     # 40%
@@ -2818,17 +2825,26 @@ def fetch_sales_insight() -> dict:
                 "total_days": len(work_days),
                 "avg_qty": round(avg_qty, 1),
                 "total_qty": total_qty,
+                "is_b2b": pid in b2b_pids,
             }
+            if pid in b2b_pids:
+                # B2B 납품 채널 전용 → 별도 보관, 직접판매 긴급대응에서 제외
+                if active_count >= threshold_watch:
+                    b2b_anomalies.append(item)
+                continue
             if active_count >= threshold_urgent:
                 anomalies.append(item)
             elif active_count >= threshold_watch:
                 watchlist.append(item)
         anomalies.sort(key=lambda x: -x["avg_qty"])
         watchlist.sort(key=lambda x: -x["avg_qty"])
+        b2b_anomalies.sort(key=lambda x: -x["avg_qty"])
 
     return {
         "anomalies": anomalies,
         "watchlist": watchlist,
+        "b2b_anomalies": b2b_anomalies,
+        "b2b_pids": b2b_pids,
         "daily_sellers": daily_sellers,
         "work_days": work_days,
         "today_count": len(today_products),
@@ -7257,6 +7273,8 @@ elif current_page == "sales_inventory":
     if insight_data["status"] in ("분석 완료", "송장 미출력"):
         anomalies = insight_data["anomalies"]
         watchlist = insight_data.get("watchlist", [])
+        b2b_anomalies = insight_data.get("b2b_anomalies", [])
+        b2b_pids_inv = insight_data.get("b2b_pids", set())
         daily_sellers = insight_data["daily_sellers"]
         _today_shipped_inv = insight_data.get("today_shipped", False)
 
@@ -7516,11 +7534,12 @@ elif current_page == "sales_inventory":
         total_all_sku = len(product_names_map)
 
         _dormant_count_inv = len([s for s in daily_sellers if not s["today_shipped"]]) if _today_shipped_inv else 0
-        tab_all, tab_today, tab_anomaly, tab_watch, tab_sku, tab_low, tab_brand = st.tabs([
+        tab_all, tab_today, tab_anomaly, tab_watch, tab_b2b, tab_sku, tab_low, tab_brand = st.tabs([
             f"📊 최근 5일 출고 ({insight_data['total_tracked']})",
             f"📦 오늘 출고 ({insight_data['today_count']})",
             f"🔴 긴급 대응 ({len(anomalies)})",
             f"🟡 추가 확인 ({len(watchlist)})",
+            f"🚚 로켓/제트 납품 ({len(b2b_pids_inv)})",
             f"🏷️ 전체 SKU ({total_all_sku})",
             f"⚠️ 재고 부족 ({inventory_data['low_stock_count']})",
             f"🏷️ 브랜드별 ({len(all_brands)})",
@@ -7554,6 +7573,77 @@ elif current_page == "sales_inventory":
                 _render_product_list(watch_sorted, "tab_watch")
             else:
                 st.success("✅ 추가 확인 상품 없음")
+
+        # ── 🚚 로켓/제트배송 납품 전용 탭 ──
+        with tab_b2b:
+            st.markdown("""
+            <div style="background:#f0f9ff;border:1px solid #bae6fd;border-radius:10px;padding:14px 18px;margin-bottom:16px;">
+            <b>🚚 쿠팡 로켓배송 · 제트배송 (B2B 납품)</b><br>
+            <span style="font-size:0.88rem;color:#374151;">
+            이 채널은 <b>직접판매가 아닌 납품 방식</b>이라 긴급대응·추가확인 목록에서 <b>자동 제외</b>됩니다.<br>
+            납품 발주 확인 → 재고 보충 → 발주서 대응 방식으로 별도 운영하세요.
+            </span>
+            </div>
+            """, unsafe_allow_html=True)
+
+            if not b2b_pids_inv:
+                st.info("🔍 최근 14일 동안 로켓/제트배송 전용으로 출고된 SKU가 없습니다.\n\n쇼핑몰 목록에서 '로켓배송', '제트배송'이 포함된 채널이 감지되면 자동으로 표시됩니다.")
+            else:
+                # B2B 전용 SKU 현황 테이블
+                b2b_rows = []
+                for pid in sorted(b2b_pids_inv):
+                    name = product_names_map.get(pid, pid)
+                    brand = extract_brand(name)
+                    b2b_shipped_today = any(s["product_id"] == pid and s.get("today_shipped") for s in daily_sellers)
+                    avg_qty = next((s["avg_qty"] for s in daily_sellers if s["product_id"] == pid), 0)
+                    active_days = next((s["active_days"] for s in daily_sellers if s["product_id"] == pid), 0)
+                    total_days = next((s["total_days"] for s in daily_sellers if s["product_id"] == pid), len(insight_data.get("work_days", [])))
+                    alert_flag = "🔴 미출고" if _today_shipped_inv and not b2b_shipped_today else ("✅ 출고완료" if b2b_shipped_today else "⏳ 대기")
+                    b2b_rows.append({
+                        "브랜드": brand,
+                        "상품코드": pid,
+                        "상품명": name,
+                        "일평균 납품": f"{avg_qty:.1f}",
+                        f"출고일/{total_days}일": f"{active_days}일",
+                        "오늘 상태": alert_flag,
+                    })
+                b2b_rows_sorted = sorted(b2b_rows, key=lambda x: (x["브랜드"], x["상품명"]))
+                st.dataframe(pd.DataFrame(b2b_rows_sorted), use_container_width=True, hide_index=True)
+
+                # 오늘 미납 B2B 상품 강조
+                if _today_shipped_inv and b2b_anomalies:
+                    st.markdown("---")
+                    st.markdown(f"#### ⚠️ 오늘 미출고 납품 SKU — {len(b2b_anomalies)}건")
+                    st.caption("최근 자주 납품됐는데 오늘 출고 기록 없음 → 발주 누락 여부 확인 필요")
+                    b2b_anom_rows = []
+                    for item in b2b_anomalies:
+                        pid = item["product_id"]
+                        name = product_names_map.get(pid, pid)
+                        b2b_anom_rows.append({
+                            "상품코드": pid,
+                            "상품명": name,
+                            f"출고일/{item['total_days']}일": item["active_days"],
+                            "일평균 납품": f"{item['avg_qty']:.1f}",
+                        })
+                    st.dataframe(pd.DataFrame(b2b_anom_rows), use_container_width=True, hide_index=True)
+
+                # B2B 대응 가이드
+                with st.expander("📋 로켓/제트배송 납품 대응 가이드", expanded=False):
+                    st.markdown("""
+**납품 채널 특성**
+- 쿠팡 로켓배송 · 제트배송은 쿠팡이 발주를 내리는 **B2B 납품** 방식입니다.
+- 가격 경쟁·광고·리뷰 전략이 아닌 **재고 보충 및 발주 대응**이 핵심입니다.
+
+**일일 대응 순서**
+1. 오늘 미출고 납품 SKU 확인 (위 테이블)
+2. OneWMS → 발주(입고예정) 탭에서 쿠팡 발주 확인
+3. 재고 부족 시 즉시 발주 / 납기 조율
+4. 출고 완료 후 송장번호 등록 확인
+
+**주의 사항**
+- 납품 지연은 쿠팡 페널티(발주 취소, 점수 감점)로 이어질 수 있습니다.
+- 로켓배송 SKU는 쿠팡 센터 입고 기준이므로 실제 판매일과 시차가 있습니다.
+                    """)
 
         with tab_sku:
             stock_map = {}
