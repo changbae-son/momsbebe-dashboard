@@ -806,6 +806,246 @@ def flush_pending_alerts():
     remaining = [a for a in alerts if not a.get("queued_at", "").startswith(today_str_flush)]
     save_json(PENDING_ALERTS_FILE, {"alerts": remaining})
 
+# ═════════════════════════════════════════════════════════════
+# 📣 MD 알림 시스템 (shina2_work_bot) — 실시간 + 리마인드
+# ═════════════════════════════════════════════════════════════
+
+MD_QUIET_FILE  = os.path.join(DATA_DIR, "md_quiet.json")   # {chat_id: until_iso}
+MD_SENT_FILE   = os.path.join(DATA_DIR, "md_sent_log.json") # 중복 방지 로그
+
+# ── MD 봇 설정 로더 ──
+def _get_md_bot():
+    """(token, mds_list) 반환. secrets에 없으면 ('', [])."""
+    try:
+        cfg = st.secrets["telegram_md"]
+        token = cfg.get("token", "")
+        mds = [dict(m) for m in cfg.get("mds", [])]
+        return token, mds
+    except Exception:
+        return "", []
+
+def _md_is_quiet(chat_id: str) -> bool:
+    """quiet 모드 중인지 확인."""
+    quiet = load_json(MD_QUIET_FILE, {})
+    until = quiet.get(str(chat_id), "")
+    if not until:
+        return False
+    try:
+        return datetime.now(KST) < datetime.fromisoformat(until)
+    except Exception:
+        return False
+
+def _md_dedup_key(alert_type: str, key: str) -> str:
+    today = datetime.now(KST).strftime("%Y-%m-%d")
+    return f"{today}|{alert_type}|{key}"
+
+def _md_already_sent(dedup_key: str) -> bool:
+    log = load_json(MD_SENT_FILE, {"sent": []})
+    return dedup_key in log.get("sent", [])
+
+def _md_mark_sent(dedup_key: str):
+    log = load_json(MD_SENT_FILE, {"sent": []})
+    sent = log.get("sent", [])
+    sent.append(dedup_key)
+    # 오늘 것만 유지
+    today = datetime.now(KST).strftime("%Y-%m-%d")
+    sent = [k for k in sent if k.startswith(today)]
+    save_json(MD_SENT_FILE, {"sent": sent})
+
+def _is_work_hour() -> bool:
+    """점심(12~13시) · 야간(19시~) · 주말 제외."""
+    now = datetime.now(KST)
+    if now.weekday() >= 5:          # 주말
+        return False
+    if now.hour < 8 or now.hour >= 19:
+        return False
+    if now.hour == 12:              # 점심
+        return False
+    return True
+
+def send_md_alert(alert_type: str, message: str, dedup_key: str = "", force: bool = False):
+    """alert_type에 구독된 MD 전원에게 발송. 스팸 방지 자동 적용.
+    alert_type: rank_lost | price_alert | anomaly | watch | remind"""
+    token, mds = _get_md_bot()
+    if not token or not mds:
+        return
+    if not force and not _is_work_hour():
+        return
+    dk = _md_dedup_key(alert_type, dedup_key or message[:40])
+    if not force and _md_already_sent(dk):
+        return
+    _md_mark_sent(dk)
+    for md in mds:
+        if not md.get("active", True):
+            continue
+        subscribed = [s.strip() for s in md.get("alerts", "").split(",")]
+        if alert_type not in subscribed:
+            continue
+        chat_id = str(md.get("chat_id", ""))
+        if not chat_id:
+            continue
+        if _md_is_quiet(chat_id):
+            continue
+        try:
+            requests.post(
+                f"https://api.telegram.org/bot{token}/sendMessage",
+                json={"chat_id": chat_id, "text": message, "parse_mode": "HTML"},
+                timeout=5,
+            )
+        except Exception:
+            pass
+
+# ── 텔레그램 명령어 처리 (/today /now /quiet /done /skip /help) ──
+def handle_md_bot_commands():
+    """getUpdates 폴링해서 MD 봇 명령어 처리. 앱 로드 시 1회 실행."""
+    token, mds = _get_md_bot()
+    if not token:
+        return
+    # 마지막 처리 offset 저장
+    offset_file = os.path.join(DATA_DIR, "md_bot_offset.json")
+    offset_data = load_json(offset_file, {"offset": 0})
+    offset = offset_data.get("offset", 0)
+    try:
+        r = requests.get(
+            f"https://api.telegram.org/bot{token}/getUpdates",
+            params={"offset": offset + 1, "limit": 20, "timeout": 1},
+            timeout=8,
+        )
+        updates = r.json().get("result", [])
+    except Exception:
+        return
+    for upd in updates:
+        offset = max(offset, upd.get("update_id", 0))
+        msg = upd.get("message", {})
+        text = (msg.get("text") or "").strip()
+        chat_id = str(msg.get("chat", {}).get("id", ""))
+        if not text or not chat_id:
+            continue
+        # 봇 명령어 파싱
+        cmd = text.split()[0].lower().split("@")[0]
+        args = text.split()[1:]
+        def _reply(t):
+            try:
+                requests.post(
+                    f"https://api.telegram.org/bot{token}/sendMessage",
+                    json={"chat_id": chat_id, "text": t, "parse_mode": "HTML"},
+                    timeout=5,
+                )
+            except Exception:
+                pass
+        if cmd == "/help":
+            _reply(
+                "📋 <b>신아 업무봇 명령어</b>\n\n"
+                "/today — 오늘 보드 진행률 요약\n"
+                "/now — 현재 1순위 업무\n"
+                "/quiet 1h — 1시간 알림 OFF\n"
+                "/quiet off — 알림 다시 ON\n"
+                "/help — 이 도움말"
+            )
+        elif cmd == "/today":
+            try:
+                stages = compute_board_items()
+                state  = load_board_state()
+                all_items = [it for s in stages for it in s["items"]]
+                done_n = sum(1 for it in all_items if it["id"] in state.get("completed", {}))
+                skip_n = sum(1 for it in all_items if it["id"] in state.get("skipped", {}))
+                total  = len(all_items)
+                pct    = int((done_n + skip_n) / total * 100) if total else 0
+                cur_st = get_current_stage(stages)
+                top    = get_top_priority(stages[cur_st-1]["items"], state)
+                top_title = top["title"] if top else "모두 완료"
+                _reply(
+                    f"📊 <b>오늘 보드 현황</b>\n"
+                    f"진행률: {done_n+skip_n}/{total} ({pct}%)\n"
+                    f"현재 Stage: {cur_st}/4\n"
+                    f"다음 할 일: {top_title}"
+                )
+            except Exception as e:
+                _reply(f"오류: {e}")
+        elif cmd == "/now":
+            try:
+                stages = compute_board_items()
+                state  = load_board_state()
+                cur_st = get_current_stage(stages)
+                top    = get_top_priority(stages[cur_st-1]["items"], state)
+                if top:
+                    _reply(f"🎯 <b>지금 1순위</b>\n{top['icon']} {top['title']}\n\n💡 {top['why']}")
+                else:
+                    _reply("✅ 현재 Stage 모두 완료!")
+            except Exception as e:
+                _reply(f"오류: {e}")
+        elif cmd == "/quiet":
+            arg = args[0].lower() if args else "1h"
+            quiet = load_json(MD_QUIET_FILE, {})
+            if arg == "off":
+                quiet.pop(chat_id, None)
+                save_json(MD_QUIET_FILE, quiet)
+                _reply("🔔 알림 다시 ON 됩니다.")
+            else:
+                hrs = 1
+                if arg.endswith("h"):
+                    try: hrs = int(arg[:-1])
+                    except: hrs = 1
+                until = (datetime.now(KST) + timedelta(hours=hrs)).isoformat()
+                quiet[chat_id] = until
+                save_json(MD_QUIET_FILE, quiet)
+                _reply(f"🔕 {hrs}시간 동안 알림 OFF. /quiet off 로 해제.")
+        elif cmd in ("/start", "/안녕"):
+            _reply("👋 신아인터네셔날 업무봇입니다.\n/help 로 명령어 확인하세요.")
+    save_json(offset_file, {"offset": offset})
+
+# ── 리마인드 엔진 ──
+def compute_remind_signals() -> list:
+    """시간대별 보드 진행 지연 감지 → 리마인드 메시지 목록 반환."""
+    now = datetime.now(KST)
+    if not _is_work_hour():
+        return []
+    reminders = []
+    try:
+        stages  = compute_board_items()
+        state   = load_board_state()
+        all_items = [it for s in stages for it in s["items"]]
+        done_n  = sum(1 for it in all_items if it["id"] in state.get("completed", {}))
+        skip_n  = sum(1 for it in all_items if it["id"] in state.get("skipped", {}))
+        total   = len(all_items)
+        pct     = int((done_n + skip_n) / total * 100) if total else 100
+        # Stage 1 아이템만
+        s1_items = stages[0]["items"] if stages else []
+        s1_done  = sum(1 for it in s1_items
+                       if it["id"] in state.get("completed", {}) or it["id"] in state.get("skipped", {}))
+        s1_pct   = int(s1_done / len(s1_items) * 100) if s1_items else 100
+        # Stage 2 완료 여부 (송장)
+        s2_done  = bool(state.get("completed", {}).get("s2_invoice"))
+
+        h = now.hour; m = now.minute
+
+        # R1 — 09:30 Stage1 < 50%
+        if h == 9 and 30 <= m < 35 and s1_pct < 50:
+            reminders.append(("remind", f"[리마인드 09:30]\nStage1 진행 {s1_pct}% — 송장 출력 전 가격 점검 마무리 필요\n\n남은 항목: {len(s1_items)-s1_done}건", "r1_morning"))
+        # R2 — 11:00 송장 미완료
+        if h == 11 and 0 <= m < 5 and not s2_done:
+            reminders.append(("remind", "[리마인드 11:00]\n아직 송장 출력이 완료되지 않았습니다.\nStage3(본 업무)가 잠금 상태입니다.", "r2_invoice"))
+        # R3 — 14:00 전체 30% 미만
+        if h == 14 and 0 <= m < 5 and pct < 30:
+            reminders.append(("remind", f"[리마인드 14:00]\n오늘 보드 진행 {pct}% — 오후 3시간 남음\n긴급 대응 항목 우선 처리 권장", "r3_afternoon"))
+        # R4 — 16:30 전체 60% 미만
+        if h == 16 and 30 <= m < 35 and pct < 60:
+            reminders.append(("remind", f"[리마인드 16:30]\n마감 1.5시간 전 — 진행 {pct}%\n미완료 {total - done_n - skip_n}건, 핵심 항목만이라도 완료", "r4_closing"))
+        # R5 — 17:30 완료 90%+ 칭찬
+        if h == 17 and 30 <= m < 35 and pct >= 90:
+            reminders.append(("remind", f"오늘 수고하셨습니다! 보드 {pct}% 완료. 내일도 화이팅!", "r5_praise"))
+    except Exception:
+        pass
+    return reminders
+
+
+# ── 리마인드 발송 (앱 로드 또는 cron 모드에서 호출) ──
+def run_remind_check():
+    """리마인드 계산 후 MD에게 발송."""
+    for alert_type, msg, dk in compute_remind_signals():
+        send_md_alert(alert_type, msg, dedup_key=dk)
+
+
 # ─────────────────────────────────────────────
 # 사례 DB
 # ─────────────────────────────────────────────
@@ -1402,7 +1642,10 @@ def check_single_watch(watch: dict) -> dict | None:
         if target.get("product_name"):
             msg_lines.insert(1, f"상품: {target['product_name'][:50]}")
         try:
-            send_telegram("\n".join(msg_lines))
+            _watch_msg = "\n".join(msg_lines)
+            send_telegram(_watch_msg)
+            # MD 봇 알림
+            send_md_alert("watch", f"[경쟁사 워치] {_watch_msg}", dedup_key=f"watch_{keyword}")
             target["last_alert"] = datetime.now(KST).isoformat()
         except Exception:
             pass
@@ -2417,11 +2660,61 @@ def fetch_slow_moving_products() -> dict:
 
 
 # ─────────────────────────────────────────────
+# 2-0b. B2B 납품 채널(쿠팡 로켓배송/제트배송) 전용 SKU 식별
+# ─────────────────────────────────────────────
+# 가격경쟁/직접판매 로직과 분리하기 위해, 로켓/제트로만 출고되는 SKU는
+# 긴급 대응(anomalies) / 추가 확인(watchlist) 등에서 제외한다.
+B2B_SHOP_KEYWORDS = ("로켓배송", "로켓", "제트배송", "제트")  # shop_name 매칭
+
+@st.cache_data(ttl=3600, show_spinner=False)
+def get_b2b_shop_codes() -> set:
+    """shop_list에서 로켓/제트 채널 코드 set 반환."""
+    try:
+        shop_list = fetch_shop_list()
+    except Exception:
+        return set()
+    codes = set()
+    for code, name in shop_list.items():
+        if any(kw in (name or "") for kw in B2B_SHOP_KEYWORDS):
+            codes.add(str(code))
+    return codes
+
+@st.cache_data(ttl=1800, show_spinner=False)
+def get_b2b_only_product_ids(days: int = 14) -> set:
+    """최근 N일 동안 '로켓/제트 채널로만' 주문된 product_id 집합.
+    이 SKU들은 B2B 납품 성격이라 직접판매 긴급대응 로직에서 제외한다."""
+    from datetime import datetime as _dt, timedelta as _td
+    b2b_codes = get_b2b_shop_codes()
+    if not b2b_codes:
+        return set()
+    today = _dt.now(KST)
+    start = (today - _td(days=days)).strftime("%Y-%m-%d")
+    end   = (today - _td(days=1)).strftime("%Y-%m-%d")
+    try:
+        all_orders = _fetch_orders_range(start, end)
+    except Exception:
+        return set()
+    pid_shop_codes: dict = {}  # product_id → set(shop_code)
+    for o in all_orders:
+        sc = str(o.get("shop_id", "") or "")
+        if not sc:
+            continue
+        for op in (o.get("order_products") or []):
+            pid = str(op.get("product_id", "") or "")
+            if not pid:
+                continue
+            pid_shop_codes.setdefault(pid, set()).add(sc)
+    # 모든 출고 채널이 B2B 채널 안에 포함된 SKU만 반환
+    return {pid for pid, codes in pid_shop_codes.items() if codes and codes.issubset(b2b_codes)}
+
+
+# ─────────────────────────────────────────────
 # 2-1. 판매 인사이트 분석 (판매 대응 필요 상품 감지)
 # ─────────────────────────────────────────────
 @st.cache_data(ttl=1800, show_spinner=False)
 def fetch_sales_insight() -> dict:
-    """최근 5영업일 출고 패턴 분석 → 이상 징후 감지."""
+    """최근 5영업일 출고 패턴 분석 → 이상 징후 감지.
+    ※ 쿠팡 로켓배송/제트배송 = 납품(B2B) 채널이므로 직접판매 긴급대응에서 제외."""
     from collections import defaultdict
     keys = get_onewms_keys()
     if not keys:
@@ -5294,6 +5587,29 @@ if _qp_mode == "board":
     _render_board_mode()
     st.stop()
 
+# ── cron 모드: GitHub Actions가 주기적으로 호출 ──
+if _qp_mode == "cron":
+    st.set_page_config(page_title="cron", layout="centered")
+    _gist_restore_all()
+    # 1) 리마인드 발송
+    run_remind_check()
+    # 2) 텔레그램 명령어 처리
+    handle_md_bot_commands()
+    # 3) 경쟁사 워치 백그라운드 체크
+    try:
+        _watches = load_json(WATCHES_FILE, {"watches": []}).get("watches", [])
+        _active  = [w for w in _watches if w.get("active", True)]
+        for _w in _active[:10]:  # 최대 10개
+            try:
+                check_competitor_watch(_w)
+            except Exception:
+                pass
+        save_watches(_watches)
+    except Exception:
+        pass
+    st.success(f"cron OK — {datetime.now(KST).strftime('%H:%M')}")
+    st.stop()
+
 
 with st.sidebar:
     st.markdown('<div style="display:flex;align-items:center;margin-bottom:0.3rem;"><div class="sidebar-logo"><div class="kb-text">KINI<br>BINI</div><div class="kb-sub">Premium</div></div><span style="font-size:1.3rem;font-weight:800;">신아인터네셔날</span></div>', unsafe_allow_html=True)
@@ -6404,6 +6720,27 @@ current_page = st.session_state.get("current_page", "dashboard")
 
 # 앱 로드 시 백그라운드 작업
 flush_pending_alerts()
+
+# MD 봇 명령어 처리 (30초 캐시로 과호출 방지)
+_cmd_cache_key = "_md_cmd_last"
+_cmd_last = st.session_state.get(_cmd_cache_key, None)
+if _cmd_last is None or (datetime.now(KST) - _cmd_last).total_seconds() > 60:
+    try:
+        handle_md_bot_commands()
+        run_remind_check()
+        # 1위 빼앗김 MD 알림 (하루 1회)
+        _sig = compute_action_signals(fresh_days=7)
+        _stolen = _sig.get("rank_lost_stolen", [])
+        if _stolen:
+            _s_lines = "\n".join(f"• {s['keyword']} (현재 {s['our_rank']}위)" for s in _stolen[:5])
+            send_md_alert(
+                "rank_lost",
+                f"[1위 빼앗김] {len(_stolen)}개 키워드\n{_s_lines}\n\n가격 모니터링에서 확인하세요.",
+                dedup_key=f"rank_lost_{datetime.now(KST).strftime('%Y-%m-%d')}_{len(_stolen)}",
+            )
+    except Exception:
+        pass
+    st.session_state[_cmd_cache_key] = datetime.now(KST)
 check_outcomes_7d()
 maybe_send_weekly_report()
 
@@ -8211,6 +8548,20 @@ elif current_page == "daily_log":
             _auto_added += 1
         if _auto_added:
             save_tasks()
+            # 긴급 대응 신규 발생 시 MD 알림
+            _new_urgents = [a for a in anomalies
+                            if a.get("product_id") not in existing_auto_pids]
+            if _new_urgents:
+                _anom_lines = "\n".join(
+                    f"• {_pname_map.get(a['product_id'], a['product_id'])} "
+                    f"(일평균 {a['avg_qty']}개 → 오늘 0)"
+                    for a in _new_urgents[:5]
+                )
+                send_md_alert(
+                    "anomaly",
+                    f"[긴급 대응] 오늘 멈춘 상품 {len(_new_urgents)}건\n{_anom_lines}",
+                    dedup_key=f"anomaly_{today_str}_{len(_new_urgents)}",
+                )
 
     # ── 어제 미완료 이월 — 배치 저장 ──
     yesterday_incomplete = [t for t in all_tasks if t.get("due") == yesterday_str and not t.get("done")]

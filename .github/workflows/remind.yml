@@ -1,0 +1,27 @@
+name: MD 리마인드 & 경쟁사 워치 cron
+
+on:
+  schedule:
+    # KST = UTC+9 → 각 시각을 UTC로 변환
+    - cron: "30 0 * * 1-5"   # KST 09:30 (월~금)
+    - cron: "0  2 * * 1-5"   # KST 11:00
+    - cron: "0  5 * * 1-5"   # KST 14:00
+    - cron: "30 7 * * 1-5"   # KST 16:30
+    - cron: "30 8 * * 1-5"   # KST 17:30 (칭찬 or 마감)
+    - cron: "0  */1 * * 1-5" # 매시 정각 (경쟁사 워치 + 명령어 폴링)
+  workflow_dispatch:          # 수동 실행 버튼
+
+jobs:
+  remind:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: 리마인드 & 워치 cron 호출
+        run: |
+          APP_URL="${{ secrets.STREAMLIT_APP_URL }}"
+          if [ -z "$APP_URL" ]; then
+            APP_URL="https://momsbebe-dashboard-wwbcarjdsk9sybaj9ajyrg.streamlit.app"
+          fi
+          curl -sf --max-time 60 "${APP_URL}/?mode=cron" -o /dev/null \
+            && echo "✅ cron OK" \
+            || echo "⚠️  cron 응답 없음 (앱 슬립 상태일 수 있음)"
