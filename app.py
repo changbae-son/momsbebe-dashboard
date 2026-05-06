@@ -2164,10 +2164,23 @@ def _gist_backup(filepath):
 def load_json(filepath, default=None):
     if default is None:
         default = {}
-    if os.path.exists(filepath):
+    if not os.path.exists(filepath):
+        return default
+    try:
+        # 빈 파일 방어
+        if os.path.getsize(filepath) == 0:
+            return default
         with open(filepath, "r", encoding="utf-8") as f:
             return json.load(f)
-    return default
+    except (json.JSONDecodeError, OSError, ValueError):
+        # 손상된 JSON / 읽기 실패 → 안전하게 default 반환
+        # 손상 파일은 *.corrupt.bak 으로 보관 (덮어쓰기 방지)
+        try:
+            import shutil as _sh
+            _sh.copyfile(filepath, filepath + ".corrupt.bak")
+        except Exception:
+            pass
+        return default
 
 
 def save_json(filepath, data):
@@ -7055,6 +7068,17 @@ if current_page == "dashboard":
                 st.markdown("**⏰ 7일 결과 확인 필요**")
                 for c in _sig["pending_7d"][:10]:
                     st.markdown(f'- {c.get("date","")} · {c.get("product_name","")}')
+            if _sig["queued_alerts"]:
+                st.markdown("**🔔 오늘 큐 알림 (18시 일괄 발송 대기)**")
+                import re as _re_q
+                for a in _sig["queued_alerts"][:10]:
+                    _msg_lines = [ln for ln in str(a.get("message", "")).split("\n") if ln.strip()]
+                    _head = _msg_lines[1] if len(_msg_lines) > 1 else (_msg_lines[0] if _msg_lines else "(내용없음)")
+                    _head = _re_q.sub(r"<[^>]+>", "", _head).strip()
+                    _qt = str(a.get("queued_at", ""))[-5:]  # HH:MM
+                    st.markdown(f'- `{_qt}` {_head}')
+                if len(_sig["queued_alerts"]) > 10:
+                    st.caption(f"… 외 {len(_sig['queued_alerts']) - 10}건")
             if _sig["total"] == 0 and not _sig["queued_alerts"]:
                 st.success("✅ 처리할 항목 없음")
 
