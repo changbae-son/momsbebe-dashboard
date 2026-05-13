@@ -850,7 +850,11 @@ def _md_mark_sent(dedup_key: str):
     # 오늘 것만 유지
     today = datetime.now(KST).strftime("%Y-%m-%d")
     sent = [k for k in sent if k.startswith(today)]
-    save_json(MD_SENT_FILE, {"sent": sent})
+    data = {"sent": sent}
+    with open(MD_SENT_FILE, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
+    # 중복 방지 로그는 즉시 Gist에 동기 저장 (daemon 스레드 종료 방지)
+    _gist_backup(MD_SENT_FILE, sync=True)
 
 def _is_work_hour() -> bool:
     """점심(12~13시) · 야간(19시~) · 주말 제외."""
@@ -2121,9 +2125,11 @@ def _gist_restore_all():
         )
         if resp.status_code == 200:
             files = resp.json().get("files", {})
+            # md_sent_log.json 은 중복 방지 핵심 파일 → 항상 Gist 최신으로 덮어쓰기
+            ALWAYS_OVERWRITE = {"md_sent_log.json"}
             for fname, fdata in files.items():
                 local_path = os.path.join(DATA_DIR, fname)
-                if not os.path.exists(local_path) or os.path.getsize(local_path) == 0:
+                if fname in ALWAYS_OVERWRITE or not os.path.exists(local_path) or os.path.getsize(local_path) == 0:
                     with open(local_path, "w", encoding="utf-8") as f:
                         f.write(fdata["content"])
     except Exception:
@@ -2131,8 +2137,9 @@ def _gist_restore_all():
     st.session_state["_gist_restored"] = True
 
 
-def _gist_backup(filepath):
-    """파일 변경 시 GitHub Gist에 백업 (백그라운드 스레드)."""
+def _gist_backup(filepath, sync: bool = False):
+    """파일 변경 시 GitHub Gist에 백업.
+    sync=True: 중복 방지 등 즉시 반영이 필요한 파일은 동기 업로드."""
     import threading
     cfg = _get_gist_config()
     if not cfg:
@@ -2155,7 +2162,10 @@ def _gist_backup(filepath):
         except Exception:
             pass
 
-    threading.Thread(target=_upload, daemon=True).start()
+    if sync:
+        _upload()
+    else:
+        threading.Thread(target=_upload, daemon=True).start()
 
 
 # ─────────────────────────────────────────────
@@ -6750,23 +6760,26 @@ current_page = st.session_state.get("current_page", "dashboard")
 # 앱 로드 시 백그라운드 작업
 flush_pending_alerts()
 
-# MD 봇 명령어 처리 (30초 캐시로 과호출 방지)
+# MD 봇 명령어 처리 (60초 캐시로 과호출 방지)
+# ※ run_remind_check()는 GitHub Actions cron(?mode=cron)에서만 호출
+#   앱 로드 시에는 호출하지 않아 중복 발송을 방지한다.
 _cmd_cache_key = "_md_cmd_last"
 _cmd_last = st.session_state.get(_cmd_cache_key, None)
-if _cmd_last is None or (datetime.now(KST) - _cmd_last).total_seconds() > 60:
+if _cmd_last is None or (datetime.now(KST) - _cmd_last).total_seconds() > 300:
     try:
         handle_md_bot_commands()
-        run_remind_check()
-        # 1위 빼앗김 MD 알림 (하루 1회)
-        _sig = compute_action_signals(fresh_days=7)
-        _stolen = _sig.get("rank_lost_stolen", [])
-        if _stolen:
-            _s_lines = "\n".join(f"• {s['keyword']} (현재 {s['our_rank']}위)" for s in _stolen[:5])
-            send_md_alert(
-                "rank_lost",
-                f"[1위 빼앗김] {len(_stolen)}개 키워드\n{_s_lines}\n\n가격 모니터링에서 확인하세요.",
-                dedup_key=f"rank_lost_{datetime.now(KST).strftime('%Y-%m-%d')}_{len(_stolen)}",
-            )
+        # 1위 빼앗김 MD 알림 (하루 1회, 오전 10시 이후에만)
+        _now_h = datetime.now(KST).hour
+        if 10 <= _now_h < 19:
+            _sig = compute_action_signals(fresh_days=7)
+            _stolen = _sig.get("rank_lost_stolen", [])
+            if _stolen:
+                _s_lines = "\n".join(f"• {s['keyword']} (현재 {s['our_rank']}위)" for s in _stolen[:5])
+                send_md_alert(
+                    "rank_lost",
+                    f"[1위 빼앗김] {len(_stolen)}개 키워드\n{_s_lines}\n\n가격 모니터링에서 확인하세요.",
+                    dedup_key=f"rank_lost_{datetime.now(KST).strftime('%Y-%m-%d')}",
+                )
     except Exception:
         pass
     st.session_state[_cmd_cache_key] = datetime.now(KST)
