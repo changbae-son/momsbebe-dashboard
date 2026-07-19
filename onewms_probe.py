@@ -64,6 +64,7 @@ def load_keys() -> dict:
 
 
 def call(keys: dict, action: str, params: dict) -> dict:
+    """OneWMS 공식 안내는 POST. 혹시 몰라 실패하면 GET으로도 시도한다."""
     payload = {
         "partner_key": keys["partner_key"],
         "domain_key": keys["domain_key"],
@@ -71,7 +72,14 @@ def call(keys: dict, action: str, params: dict) -> dict:
         "type": "product",
     }
     payload.update(params)
-    resp = requests.get(keys["api_url"], params=payload, timeout=15)
+
+    resp = requests.post(keys["api_url"], data=payload, timeout=20)
+    resp.raise_for_status()
+    try:
+        return resp.json()
+    except ValueError:
+        pass
+    resp = requests.get(keys["api_url"], params=payload, timeout=20)
     resp.raise_for_status()
     return resp.json()
 
