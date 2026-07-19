@@ -2394,6 +2394,171 @@ def get_onesync_api_key() -> str:
     return keys.get("partner_key", "")
 
 
+# ─────────────────────────────────────────────
+# 2-b. 쿠팡 로켓배송 송장번호 → 입고정리 앱(Firestore) 동기화
+#      OneWMS는 박스 하나를 주문 여러 건으로 나눠 담고,
+#      같은 박스에 든 주문들은 같은 송장번호(trans_no)를 공유한다.
+#      발주번호(order_id)로 앱의 박스와 맞추면 박스↔송장이 1:1 대응된다.
+# ─────────────────────────────────────────────
+COUPANG_ROCKET_SHOP_ID = "10084"          # 쿠팡로켓배송(송장)
+ROCKET_FS_PROJECT = "coupang-rocket-2026"
+ROCKET_FS_KEY = "AIzaSyAzmT1tk0LmTUOGFWMY7Fop85UZ2DI8Jw8"   # 웹 공개키 (규칙이 공개라 별도 인증 불필요)
+ROCKET_FS_BASE = (f"https://firestore.googleapis.com/v1/projects/{ROCKET_FS_PROJECT}"
+                  f"/databases/(default)/documents")
+
+
+def fetch_rocket_orders(date: str) -> list:
+    """입고예정일(order_date)이 date인 쿠팡 로켓배송 주문 전체."""
+    out, page = [], 1
+    while page <= 20:
+        data = call_onewms_api("get_order_info", {
+            "start_date": date, "end_date": date, "date_type": "order_date",
+            "limit": "100", "page": str(page),
+        })
+        if not isinstance(data, dict) or data.get("error") not in (0, None, "0"):
+            break
+        batch = data.get("data") or []
+        if not batch:
+            break
+        out.extend(batch)
+        if page * 100 >= int(data.get("total", 0)):
+            break
+        page += 1
+    return [o for o in out if str(o.get("shop_id")) == COUPANG_ROCKET_SHOP_ID]
+
+
+def _fs_value(v):
+    """Firestore REST 값 → 파이썬 값"""
+    if "stringValue" in v: return v["stringValue"]
+    if "integerValue" in v: return int(v["integerValue"])
+    if "doubleValue" in v: return float(v["doubleValue"])
+    if "booleanValue" in v: return v["booleanValue"]
+    if "nullValue" in v: return None
+    if "arrayValue" in v: return [_fs_value(x) for x in v["arrayValue"].get("values", [])]
+    if "mapValue" in v: return {k: _fs_value(x) for k, x in v["mapValue"].get("fields", {}).items()}
+    return None
+
+
+def rocket_fs_get(path: str) -> dict:
+    resp = requests.get(f"{ROCKET_FS_BASE}/{path}",
+                        params={"key": ROCKET_FS_KEY, "pageSize": 300}, timeout=20)
+    resp.raise_for_status()
+    return resp.json()
+
+
+def rocket_fs_docs(path: str) -> list:
+    """{문서ID: {필드}} 목록"""
+    out = []
+    for doc in rocket_fs_get(path).get("documents", []):
+        out.append((doc["name"].split("/")[-1],
+                    {k: _fs_value(v) for k, v in (doc.get("fields") or {}).items()}))
+    return out
+
+
+def rocket_fs_write_tracking(center: str, date: str, tracking: dict):
+    body = {"fields": {"tracking": {"mapValue": {"fields": {
+        str(k): {"stringValue": str(v)} for k, v in tracking.items()}}}}}
+    resp = requests.patch(
+        f"{ROCKET_FS_BASE}/batches/{date}/plans/{center}",
+        params={"key": ROCKET_FS_KEY, "updateMask.fieldPaths": "tracking"},
+        json=body, timeout=20)
+    resp.raise_for_status()
+
+
+def _box_sig(items) -> tuple:
+    """박스 내용 지문: (발주번호, 수량) 다중집합"""
+    return tuple(sorted((str(p), int(q)) for p, q in items))
+
+
+def match_rocket_boxes(app_boxes: dict, wms_boxes: list):
+    """
+    app_boxes : {박스번호: [(발주번호, 수량), ...]}
+    wms_boxes : [{"trans_no":..., "items":[(발주번호, 수량), ...]}]
+    반환: ({박스번호: 송장번호}, [경고문])
+    """
+    result, warns, remaining = {}, [], list(wms_boxes)
+
+    # 1단계 — 수량까지 완전히 같은 것끼리
+    for box, items in sorted(app_boxes.items()):
+        s = _box_sig(items)
+        hit = next((w for w in remaining if _box_sig(w["items"]) == s), None)
+        if hit:
+            result[box] = hit["trans_no"]
+            remaining.remove(hit)
+
+    # 2단계 — 발주 구성만 같은 경우 (수량 차이는 경고)
+    for box, items in sorted(app_boxes.items()):
+        if box in result:
+            continue
+        pos = {str(p) for p, _ in items}
+        hit = next((w for w in remaining if {str(p) for p, _ in w["items"]} == pos), None)
+        if hit:
+            result[box] = hit["trans_no"]
+            remaining.remove(hit)
+            warns.append(f"박스 {box}: 발주 구성은 같은데 수량이 다릅니다 "
+                         f"(앱 {sum(q for _, q in items)}개 / OneWMS {sum(q for _, q in hit['items'])}개)")
+
+    for box in sorted(app_boxes):
+        if box not in result:
+            pos = ", ".join(sorted({str(p) for p, _ in app_boxes[box]}))
+            warns.append(f"박스 {box}: OneWMS에서 짝을 못 찾음 (발주 {pos}) — 아직 발송 전이거나 박스 구성이 다릅니다")
+    for w in remaining:
+        pos = ", ".join(sorted({str(p) for p, _ in w["items"]}))
+        warns.append(f"OneWMS 송장 {w['trans_no']}: 앱에 대응 박스 없음 (발주 {pos})")
+    return result, warns
+
+
+def sync_rocket_tracking(date: str, write: bool = False) -> dict:
+    """송장번호를 조회해 센터별로 매칭한다. write=True면 앱에 기록까지."""
+    orders = fetch_rocket_orders(date)
+    if not orders:
+        return {"error": f"{date} 입고예정 쿠팡 로켓배송 주문이 OneWMS에 없습니다."}
+
+    wms_by_trans = {}
+    for o in orders:
+        if o.get("trans_no"):
+            wms_by_trans.setdefault(str(o["trans_no"]), []).append(o)
+
+    plans = rocket_fs_docs(f"batches/{date}/plans")
+    if not plans:
+        return {"error": f"입고정리 앱에 {date} 박스 배정이 없습니다."}
+
+    centers, written = [], 0
+    for center, plan in plans:
+        allocs = plan.get("allocs") or []
+        if not allocs:
+            continue
+        app_boxes = {}
+        for a in allocs:
+            app_boxes.setdefault(int(a["box"]), []).append((str(a["poNo"]), int(a["qty"])))
+
+        my_pos = {p for items in app_boxes.values() for p, _ in items}
+        cands = [{"trans_no": tno,
+                  "items": [(str(o.get("order_id")), int(o.get("qty") or 0)) for o in os_]}
+                 for tno, os_ in wms_by_trans.items()
+                 if any(str(o.get("order_id")) in my_pos for o in os_)]
+
+        matched, warns = match_rocket_boxes(app_boxes, cands)
+        if write and matched:
+            merged = dict(plan.get("tracking") or {})
+            merged.update({str(k): v for k, v in matched.items()})
+            rocket_fs_write_tracking(center, date, merged)
+            written += len(matched)
+
+        centers.append({
+            "center": center,
+            "boxes": [{"box": b,
+                       "qty": sum(q for _, q in app_boxes[b]),
+                       "pos": ", ".join(f"{p}({q})" for p, q in sorted(app_boxes[b])),
+                       "trans_no": matched.get(b, "")}
+                      for b in sorted(app_boxes)],
+            "warns": warns,
+        })
+
+    return {"orders": len(orders), "wms_boxes": len(wms_by_trans),
+            "centers": centers, "written": written}
+
+
 @st.cache_data(ttl=600, show_spinner=False)
 def fetch_yesterday_sales() -> dict:
     """OneWMS API(get_order_info)로 어제 매출 데이터를 조회합니다."""
@@ -7663,6 +7828,59 @@ elif current_page == "sales_inventory":
                             "일평균 납품": f"{item['avg_qty']:.1f}",
                         })
                     st.dataframe(pd.DataFrame(b2b_anom_rows), use_container_width=True, hide_index=True)
+
+                # ── 📮 송장번호 → 입고정리 앱 동기화 ──
+                st.divider()
+                st.markdown("#### 📮 송장번호 자동 기입")
+                st.caption(
+                    "OneWMS에서 발급된 송장번호를 "
+                    "[쿠팡 로켓배송 입고 정리 앱](https://coupang-rocket-2026.web.app)의 "
+                    "박스별 송장 칸에 채워 넣습니다. 쉽먼트 등록 전에 실행하세요."
+                )
+
+                _sync_c1, _sync_c2, _sync_c3 = st.columns([1.2, 1, 1])
+                with _sync_c1:
+                    _sync_date = st.date_input(
+                        "입고예정일", value=datetime.now(KST).date() + timedelta(days=1),
+                        key="rocket_sync_date",
+                        help="쿠팡 발주서의 입고예정일 = OneWMS 주문일")
+                with _sync_c2:
+                    _do_preview = st.button("🔍 미리보기", key="rocket_sync_preview",
+                                            use_container_width=True)
+                with _sync_c3:
+                    _do_write = st.button("💾 앱에 기록", key="rocket_sync_write",
+                                          type="primary", use_container_width=True)
+
+                if _do_preview or _do_write:
+                    _dstr = _sync_date.strftime("%Y-%m-%d")
+                    with st.spinner(f"{_dstr} 송장번호 조회 중…"):
+                        try:
+                            _res = sync_rocket_tracking(_dstr, write=_do_write)
+                        except Exception as e:
+                            _res = {"error": f"조회 실패: {e}"}
+
+                    if _res.get("error"):
+                        st.warning(_res["error"])
+                    else:
+                        st.success(
+                            f"OneWMS 주문 {_res['orders']}건 · 실제 박스 {_res['wms_boxes']}개"
+                            + (f" · **{_res['written']}개 박스에 기록 완료**" if _do_write else " · 미리보기")
+                        )
+                        for _c in _res["centers"]:
+                            _ok = sum(1 for b in _c["boxes"] if b["trans_no"])
+                            with st.expander(
+                                f"{_c['center']} — {_ok}/{len(_c['boxes'])} 박스 매칭",
+                                expanded=bool(_c["warns"])):
+                                st.dataframe(pd.DataFrame([{
+                                    "박스": b["box"], "수량": b["qty"],
+                                    "발주(수량)": b["pos"],
+                                    "송장번호": b["trans_no"] or "—",
+                                } for b in _c["boxes"]]), use_container_width=True, hide_index=True)
+                                for _w in _c["warns"]:
+                                    st.caption(f"⚠️ {_w}")
+                        if not _do_write:
+                            st.info("내용이 맞으면 **[💾 앱에 기록]** 을 누르세요. "
+                                    "짝을 못 찾은 박스는 건너뛰므로 잘못 기입될 일은 없습니다.")
 
                 # B2B 대응 가이드
                 with st.expander("📋 로켓/제트배송 납품 대응 가이드", expanded=False):
