@@ -110,12 +110,19 @@ def fs_doc(doc: dict) -> dict:
     return {k: fs_val(v) for k, v in (doc.get("fields") or {}).items()}
 
 
-def fs_write_tracking(center: str, date: str, tracking: dict):
-    body = {"fields": {"tracking": {"mapValue": {"fields": {
-        str(k): {"stringValue": str(v)} for k, v in tracking.items()}}}}}
+def fs_write_tracking(center: str, date: str, tracking: dict, tracking_sig: dict):
+    """송장번호와 함께 '그때의 박스 내용 지문'도 남긴다.
+       나중에 박스 구성이 바뀌면 앱이 이 지문으로 알아채고 재동기화를 요구한다."""
+    body = {"fields": {
+        "tracking": {"mapValue": {"fields": {
+            str(k): {"stringValue": str(v)} for k, v in tracking.items()}}},
+        "trackingSig": {"mapValue": {"fields": {
+            str(k): {"stringValue": str(v)} for k, v in tracking_sig.items()}}},
+    }}
     r = requests.patch(
         f"{FS_BASE}/batches/{date}/plans/{center}",
-        params={"key": FS_KEY, "updateMask.fieldPaths": "tracking"},
+        params=[("key", FS_KEY), ("updateMask.fieldPaths", "tracking"),
+                ("updateMask.fieldPaths", "trackingSig")],
         json=body, timeout=20)
     r.raise_for_status()
 
@@ -124,6 +131,11 @@ def fs_write_tracking(center: str, date: str, tracking: dict):
 def sig(items):
     """박스 내용 지문: (발주번호, 수량) 다중집합"""
     return tuple(sorted((str(p), int(q)) for p, q in items))
+
+
+def box_sig(items) -> str:
+    """앱(app.js boxSig)과 동일한 문자열 지문 — 나중에 박스가 바뀌면 앱이 알아챈다."""
+    return "|".join(sorted(f"{p}:{q}" for p, q in items))
 
 
 def match_boxes(app_boxes: dict, wms_boxes: list) -> tuple:
@@ -233,10 +245,20 @@ def main():
             print(f"      · {w}")
 
         if write and matched:
-            merged = dict(plan.get("tracking") or {})
-            merged.update({str(k): v for k, v in matched.items()})
-            fs_write_tracking(center, date, merged)
-            total_set += len(matched)
+            # 지금 있는 박스만 남긴다. 짝을 못 찾은 박스의 옛 송장은 지운다
+            # (그대로 두면 어긋난 번호가 계속 보인다). 수동 입력분은 내용이
+            # 그대로면 보존한다.
+            old_tr = plan.get("tracking") or {}
+            old_sg = plan.get("trackingSig") or {}
+            merged, merged_sig = {}, {}
+            for b in app_boxes:
+                cur = box_sig(app_boxes[b])
+                if b in matched:
+                    merged[str(b)], merged_sig[str(b)] = matched[b], cur
+                elif old_tr.get(str(b)) and old_sg.get(str(b)) == cur:
+                    merged[str(b)], merged_sig[str(b)] = old_tr[str(b)], cur
+            fs_write_tracking(center, date, merged, merged_sig)
+            total_set += len(merged)
             print(f"      💾 {len(matched)}개 송장 기록 완료")
         print()
 

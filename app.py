@@ -2455,12 +2455,19 @@ def rocket_fs_docs(path: str) -> list:
     return out
 
 
-def rocket_fs_write_tracking(center: str, date: str, tracking: dict):
-    body = {"fields": {"tracking": {"mapValue": {"fields": {
-        str(k): {"stringValue": str(v)} for k, v in tracking.items()}}}}}
+def rocket_fs_write_tracking(center: str, date: str, tracking: dict, tracking_sig: dict):
+    """송장번호와 함께 '그때의 박스 내용 지문'도 남긴다.
+       나중에 박스 구성이 바뀌면 앱이 이 지문으로 알아채고 재동기화를 요구한다."""
+    body = {"fields": {
+        "tracking": {"mapValue": {"fields": {
+            str(k): {"stringValue": str(v)} for k, v in tracking.items()}}},
+        "trackingSig": {"mapValue": {"fields": {
+            str(k): {"stringValue": str(v)} for k, v in tracking_sig.items()}}},
+    }}
     resp = requests.patch(
         f"{ROCKET_FS_BASE}/batches/{date}/plans/{center}",
-        params={"key": ROCKET_FS_KEY, "updateMask.fieldPaths": "tracking"},
+        params=[("key", ROCKET_FS_KEY), ("updateMask.fieldPaths", "tracking"),
+                ("updateMask.fieldPaths", "trackingSig")],
         json=body, timeout=20)
     resp.raise_for_status()
 
@@ -2468,6 +2475,11 @@ def rocket_fs_write_tracking(center: str, date: str, tracking: dict):
 def _box_sig(items) -> tuple:
     """박스 내용 지문: (발주번호, 수량) 다중집합"""
     return tuple(sorted((str(p), int(q)) for p, q in items))
+
+
+def _box_sig_str(items) -> str:
+    """앱(app.js boxSig)과 동일한 문자열 지문 — 나중에 박스가 바뀌면 앱이 알아챈다."""
+    return "|".join(sorted(f"{p}:{q}" for p, q in items))
 
 
 def match_rocket_boxes(app_boxes: dict, wms_boxes: list):
@@ -2540,10 +2552,20 @@ def sync_rocket_tracking(date: str, write: bool = False) -> dict:
 
         matched, warns = match_rocket_boxes(app_boxes, cands)
         if write and matched:
-            merged = dict(plan.get("tracking") or {})
-            merged.update({str(k): v for k, v in matched.items()})
-            rocket_fs_write_tracking(center, date, merged)
-            written += len(matched)
+            # 지금 있는 박스만 남긴다. 짝을 못 찾은 박스의 옛 송장은 지운다
+            # (그대로 두면 어긋난 번호가 계속 보인다). 수동 입력분은 내용이
+            # 그대로면 보존한다.
+            old_tr = plan.get("tracking") or {}
+            old_sg = plan.get("trackingSig") or {}
+            merged, merged_sig = {}, {}
+            for b in app_boxes:
+                cur = _box_sig_str(app_boxes[b])
+                if b in matched:
+                    merged[str(b)], merged_sig[str(b)] = matched[b], cur
+                elif old_tr.get(str(b)) and old_sg.get(str(b)) == cur:
+                    merged[str(b)], merged_sig[str(b)] = old_tr[str(b)], cur
+            rocket_fs_write_tracking(center, date, merged, merged_sig)
+            written += len(merged)
 
         centers.append({
             "center": center,
